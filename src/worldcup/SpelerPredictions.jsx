@@ -361,8 +361,7 @@ function CategorySection({ cat, selection, isConfirmed, isOpen, onToggle,
 
                 {/* Scrollbar spelarlista */}
                 <div
-                  className="space-y-1 pr-1"
-                  style={{ maxHeight:350, overflowY:'auto' }}
+                  className="space-y-1 pr-1 player-list-scroll"
                 >
                   {filtered.length > 0 ? (
                     filtered.map(p => (

@@ -15,14 +15,6 @@ export async function signUp(email, password, username) {
     options: { data: { username } },
   })
   if (error) throw error
-
-  // Skapa profil-rad
-  if (data.user) {
-    await supabase.from('profiles').upsert({
-      id:       data.user.id,
-      username: username || email.split('@')[0],
-    })
-  }
   return data
 }
 
@@ -37,7 +29,6 @@ export async function signOut() {
   // Rensa sparade tips från localStorage vid utloggning
   localStorage.removeItem('wc26-tips')
   localStorage.removeItem('wc26-bracket')
-  localStorage.removeItem('wc26-locked')
   localStorage.removeItem('wc26-room')
 }
 
@@ -177,6 +168,50 @@ export async function getRoomMembers(roomId) {
     .from('room_members')
     .select('user_id, profiles(username), joined_at')
     .eq('room_id', roomId)
+  if (error) throw error
+  return data
+}
+
+// ─── Profile helpers: get, avatar upload + profile update ────────────────
+
+export async function getProfile(userId) {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, username, avatar_url, created_at')
+    .eq('id', userId)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function uploadAvatar(userId, file) {
+  const ext = file.name.split('.').pop()
+  const path = `${userId}/avatar.${ext}`
+  const { data, error: uploadErr } = await supabase.storage
+    .from('avatars')
+    .upload(path, file, { cacheControl: '3600', upsert: true })
+  if (uploadErr) throw uploadErr
+
+  const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(path)
+  const publicUrl = urlData.publicUrl
+
+  // Try to persist avatar_url in profiles table
+  try {
+    await supabase.from('profiles').upsert({ id: userId, avatar_url: publicUrl, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+  } catch (e) {
+    console.warn('Could not update profile avatar_url:', e.message)
+  }
+
+  return publicUrl
+}
+
+export async function updateProfile(userId, updates) {
+  const payload = { id: userId, ...updates, updated_at: new Date().toISOString() }
+  const { data, error } = await supabase
+    .from('profiles')
+    .upsert(payload, { onConflict: 'id' })
+    .select()
+    .single()
   if (error) throw error
   return data
 }

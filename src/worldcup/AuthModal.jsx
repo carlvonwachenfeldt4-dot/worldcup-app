@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { signIn, signUp, supabase } from '../lib/supabase'
+import { signIn, signUp, resetPassword, supabase } from '../lib/supabase'
 
 // ─── Återanvändbart textfält ──────────────────────────────────────────────────
 
@@ -148,10 +148,7 @@ export default function AuthModal({ onSuccess, onClose }) {
     }
     setLoading(true); setError('')
     try {
-      const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin,
-      })
-      if (err) throw err
+      await resetPassword(email)
       setSuccess('Återställningslänk skickad! Kolla din e-post.')
     } catch (err) {
       setError(err.message || 'Kunde inte skicka återställningslänk.')

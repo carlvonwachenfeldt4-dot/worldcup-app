@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TOTAL_MATCHES } from './data'
-import { supabase, signOut, loadGroupTips, saveGroupTip,
-         loadBracketPicks, saveBracketPick } from '../lib/supabase'
+import { supabase, signOut, getSession, loadGroupTips, saveGroupTip,
+         loadBracketPicks, saveBracketPick, getProfile } from '../lib/supabase'
 import GroupStage        from './GroupStage'
 import Bracket           from './Bracket'
 import Leaderboard       from './Leaderboard'
 import FriendsRoom       from './FriendsRoom'
 import SpelerPredictions from './SpelerPredictions'
 import AuthModal         from './AuthModal'
+import Profile           from './Profile'
 
 function loadLocal(key, fb) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fb }
@@ -35,11 +36,12 @@ export default function WorldCupApp() {
   const [user,      setUser]      = useState(null)
   const [authReady, setAuthReady] = useState(false)
   const [showAuth,  setShowAuth]  = useState(false)
+  const [profile, setProfile] = useState(null)
   const tipDebounce = useRef({})
 
   // ─── Auth: lyssna på session-förändringar ────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    getSession().then(session => {
       setUser(session?.user ?? null)
       setAuthReady(true)
       if (session?.user) syncFromSupabase(session.user.id)
@@ -50,6 +52,31 @@ export default function WorldCupApp() {
     })
     return () => subscription.unsubscribe()
   }, [])
+
+  useEffect(() => {
+    let mounted = true
+    async function loadProfile() {
+      if (!user) { setProfile(null); return }
+      try {
+        const p = await getProfile(user.id)
+        if (!mounted) return
+        setProfile(p)
+      } catch (e) { console.warn('Could not load profile', e.message) }
+    }
+    loadProfile()
+    return () => { mounted = false }
+  }, [user])
+
+  useEffect(() => {
+    if (window.location.pathname === '/profil') {
+      if (user) setTab('profile')
+      else {
+        // redirect to login modal for unauthenticated access
+        window.history.replaceState({}, '', '/')
+        setShowAuth(true)
+      }
+    }
+  }, [user])
 
   async function syncFromSupabase(userId) {
     try {
@@ -132,9 +159,18 @@ export default function WorldCupApp() {
 
             <div className="flex items-center gap-2">
               {user ? (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => { setTab('profile'); window.history.pushState({}, '', '/profil') }} className="rounded-full overflow-hidden w-9 h-9" style={{ border: '2px solid #0F172A' }}>
+                    {profile?.avatar_url ? (
+                      <img src={profile.avatar_url} alt="avatar" style={{ width:36, height:36, objectFit:'cover' }} />
+                    ) : (
+                      <div style={{ width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', background:'#334155', color:'#F1F5F9', fontWeight:700 }}>
+                        {(profile?.username ?? user.email?.split('@')[0] ?? '').slice(0,2).toUpperCase()}
+                      </div>
+                    )}
+                  </button>
                   <span className="text-xs hidden sm:block" style={{ color: '#64748B' }}>
-                    {user.user_metadata?.username ?? user.email?.split('@')[0]}
+                    {profile?.username ?? user.user_metadata?.username ?? user.email?.split('@')[0]}
                   </span>
                   <button onClick={handleSignOut}
                           className="text-xs px-3 py-1.5 rounded-xl font-semibold transition-all"
@@ -234,6 +270,7 @@ export default function WorldCupApp() {
         {tab === 'players'      && <SpelerPredictions user={user} />}
         {tab === 'leaderboard'  && <Leaderboard groupTips={tips} bracketTips={bracketTips} user={user} />}
         {tab === 'friends'      && <FriendsRoom groupTips={tips} bracketTips={bracketTips} user={user} />}
+        {tab === 'profile'      && <Profile user={user} onBack={() => { setTab('groups'); window.history.pushState({}, '', '/') }} />}
       </div>
     </div>
   )

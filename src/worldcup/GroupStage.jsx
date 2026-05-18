@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { TEAMS, GROUPS, MATCHES_BY_GROUP, TOTAL_MATCHES, calcStandings, formatDt } from './data'
 import Flag from './Flag'
-import { isMatchLocked, getCountdown, isMatchSoon, TOURNAMENT_START } from '../lib/scoreCalculator'
+import { getCountdown, isMatchSoon, TOURNAMENT_START } from '../lib/scoreCalculator'
 import { fetchTeamLogos } from '../lib/apiFootball'
 
 // ─── Alla 48 VM-lag för vinnartippning ────────────────────────────────────────
