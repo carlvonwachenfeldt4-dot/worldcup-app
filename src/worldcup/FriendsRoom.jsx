@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { TEAMS, TOTAL_MATCHES } from './data'
 import Flag from './Flag'
-import { supabase, createRoom, joinRoom, getRoomMembers } from '../lib/supabase'
+import { supabase, createRoom, joinRoom, getRoomMembers, getRoomScores } from '../lib/supabase'
 
 const ROOM_KEY = 'wc26-room'
 
@@ -19,7 +19,9 @@ function RoomView({ room, user, myPts, myChamp, onLeave }) {
   const loadMembers = useCallback(async () => {
     try {
       const data = await getRoomMembers(room.id ?? room.code)
-      setMembers(data)
+      const userIds = data.map(m => m.user_id)
+      const scores = userIds.length > 0 ? await getRoomScores(userIds) : {}
+      setMembers(data.map(m => ({ ...m, pts: scores[m.user_id] ?? 0 })))
     } catch {
       // Faller tillbaka på mock om rummet är lokalt
       setMembers([])
@@ -56,7 +58,7 @@ function RoomView({ room, user, myPts, myChamp, onLeave }) {
     ? members.map(m => ({
         id:    m.user_id,
         name:  m.profiles?.username ?? 'Spelare',
-        pts:   0,   // hämtas från leaderboard_view i produktion
+        pts:   m.pts ?? 0,
         champ: null,
         isMe:  m.user_id === user?.id,
       }))

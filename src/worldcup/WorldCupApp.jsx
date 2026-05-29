@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TOTAL_MATCHES } from './data'
-import { supabase, signOut, getSession, loadGroupTips, saveGroupTip,
-         loadBracketPicks, saveBracketPick, getProfile } from '../lib/supabase'
+import { supabase, signOut, getSession, loadGroupTips, saveGroupTip, deleteGroupTip,
+         loadBracketPicks, saveBracketPick, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI } from '../lib/supabase'
 import GroupStage        from './GroupStage'
 import Bracket           from './Bracket'
 import Leaderboard       from './Leaderboard'
@@ -9,6 +9,8 @@ import FriendsRoom       from './FriendsRoom'
 import SpelerPredictions from './SpelerPredictions'
 import AuthModal         from './AuthModal'
 import Profile           from './Profile'
+import AdminPanel        from './AdminPanel'
+import ErrorBoundary     from './ErrorBoundary'
 
 function loadLocal(key, fb) {
   try { return JSON.parse(localStorage.getItem(key)) ?? fb }
@@ -16,14 +18,28 @@ function loadLocal(key, fb) {
 }
 
 const TABS = [
-  { id:'groups',      label:'Gruppspel / VM-Vinnare', icon:'🏟️' },
-  { id:'bracket',     label:'Slutspel',               icon:'🏆' },
-  { id:'players',     label:'Spelare',                icon:'⚽' },
-  { id:'leaderboard', label:'Ranking',                icon:'🌍' },
-  { id:'friends',     label:'Vänner',                 icon:'👥' },
+  { id:'groups',      label:'Gruppspel / VM-Vinnare', mobileLabel:'Grupp',   icon:'🏟️' },
+  { id:'bracket',     label:'Slutspel',               mobileLabel:'Slutspel',icon:'🏆' },
+  { id:'players',     label:'Spelare',                mobileLabel:'Spelare', icon:'⚽' },
+  { id:'leaderboard', label:'Ranking',                mobileLabel:'Ranking', icon:'🌍' },
+  { id:'friends',     label:'Vänner',                 mobileLabel:'Vänner',  icon:'👥' },
 ]
 
 export default function WorldCupApp() {
+  const DEMO_PREVIEW = typeof window !== 'undefined'
+    && window.location.hostname === 'localhost'
+    && new URLSearchParams(window.location.search).get('demo') === '1'
+  const DEMO_USER = {
+    id: 'demo-user',
+    email: 'demo@localhost',
+    user_metadata: { username: 'DemoUser' },
+  }
+  const DEMO_PROFILE = {
+    username: 'Demo User',
+    is_admin: true,
+    avatar_url: 'https://api.dicebear.com/6.x/avataaars/svg?seed=worldcup-demo',
+  }
+
   const [tab, setTab] = useState('groups')
 
   // Grupptips: { matchId: '1'|'X'|'2' }
@@ -37,10 +53,35 @@ export default function WorldCupApp() {
   const [authReady, setAuthReady] = useState(false)
   const [showAuth,  setShowAuth]  = useState(false)
   const [profile, setProfile] = useState(null)
+  const [userPredictions, setUserPredictions] = useState({ selections: {}, confirmed: {} })
+  const [rankInfo, setRankInfo] = useState(null)
+  const [vmWinner, setVmWinner] = useState(() => {
+    try { return localStorage.getItem('vmWinner') ?? null }
+    catch { return null }
+  })
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef(null)
   const tipDebounce = useRef({})
 
   // ─── Auth: lyssna på session-förändringar ────────────────────────────────
   useEffect(() => {
+    if (DEMO_PREVIEW) {
+      setUser(DEMO_USER)
+      setProfile(DEMO_PROFILE)
+      setUserPredictions({
+        selections: {
+          scorer: { name: 'Mbappé' },
+          assist: { name: 'Messi' },
+          yellow: { name: 'Casemiro' },
+          red: { name: 'Ramos' },
+        },
+        confirmed: {},
+      })
+      setRankInfo({ position: 4, points: 68 })
+      setVmWinner('Brazil')
+      setAuthReady(true)
+      return
+    }
     getSession().then(session => {
       setUser(session?.user ?? null)
       setAuthReady(true)
@@ -53,15 +94,45 @@ export default function WorldCupApp() {
     return () => subscription.unsubscribe()
   }, [])
 
+  // ─── Matchresultat-sync från API-Football ─────────────────────────────────
+  // Körs bara för admin-användare – RLS blockerar skrivning för övriga
+  useEffect(() => {
+    if (!profile?.is_admin) return
+    syncMatchResultsFromAPI()
+    syncPlayerStatsFromAPI()
+    const syncInterval = setInterval(() => {
+      syncMatchResultsFromAPI()
+      syncPlayerStatsFromAPI()
+    }, 15 * 60 * 1000)
+    return () => clearInterval(syncInterval)
+  }, [profile])
+
   useEffect(() => {
     let mounted = true
     async function loadProfile() {
-      if (!user) { setProfile(null); return }
+      if (!user) { setProfile(null); setUserPredictions({ selections: {}, confirmed: {} }); setVmWinner(null); return }
       try {
-        const p = await getProfile(user.id)
+        const [p, predictions, leaderboard] = await Promise.all([
+          getProfile(user.id),
+          loadPlayerPredictions(user.id),
+          fetchLeaderboard(),
+        ])
         if (!mounted) return
         setProfile(p)
-      } catch (e) { console.warn('Could not load profile', e.message) }
+        setUserPredictions(predictions)
+        const index = leaderboard?.findIndex(row => row.id === user.id)
+        setRankInfo(index >= 0 ? {
+          position: index + 1,
+          points: leaderboard[index]?.total_pts ?? 0,
+          total: leaderboard.length,
+        } : null)
+        setVmWinner(() => {
+          try { return localStorage.getItem('vmWinner') ?? null }
+          catch { return null }
+        })
+      } catch (e) {
+        console.warn('Could not load profile, predictions or ranking', e.message)
+      }
     }
     loadProfile()
     return () => { mounted = false }
@@ -71,21 +142,41 @@ export default function WorldCupApp() {
     if (window.location.pathname === '/profil') {
       if (user) setTab('profile')
       else {
-        // redirect to login modal for unauthenticated access
         window.history.replaceState({}, '', '/')
         setShowAuth(true)
       }
     }
   }, [user])
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (menuOpen && menuRef.current && !menuRef.current.contains(event.target)) {
+        setMenuOpen(false)
+      }
+    }
+    function handleEsc(event) {
+      if (menuOpen && event.key === 'Escape') setMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('touchstart', handleClickOutside)
+    document.addEventListener('keydown', handleEsc)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('touchstart', handleClickOutside)
+      document.removeEventListener('keydown', handleEsc)
+    }
+  }, [menuOpen])
+
   async function syncFromSupabase(userId) {
     try {
-      const [dbTips, dbBracket] = await Promise.all([
+      const [dbTips, dbBracket, predictions] = await Promise.all([
         loadGroupTips(userId),
         loadBracketPicks(userId),
+        loadPlayerPredictions(userId),
       ])
       setTips(prev => ({ ...prev, ...dbTips }))
       setBracketTips(prev => ({ ...prev, ...dbBracket }))
+      setUserPredictions(predictions)
     } catch (err) {
       console.warn('Kunde inte ladda från Supabase:', err.message)
     }
@@ -101,7 +192,8 @@ export default function WorldCupApp() {
     if (user) {
       clearTimeout(tipDebounce.current[matchId])
       tipDebounce.current[matchId] = setTimeout(() => {
-        saveGroupTip(user.id, matchId, val).catch(console.warn)
+        if (val) saveGroupTip(user.id, matchId, val).catch(console.warn)
+        else     deleteGroupTip(user.id, matchId).catch(console.warn)
       }, 600)
     }
   }, [user])
@@ -116,7 +208,14 @@ export default function WorldCupApp() {
 
   async function handleSignOut() {
     await signOut()
+    setMenuOpen(false)
     setUser(null)
+    setProfile(null)
+    setUserPredictions({ selections: {}, confirmed: {} })
+    setRankInfo(null)
+    setVmWinner(null)
+    setTab('groups')
+    window.history.pushState({}, '', '/')
   }
 
   const filledCount = Object.values(tips).filter(Boolean).length
@@ -159,24 +258,108 @@ export default function WorldCupApp() {
 
             <div className="flex items-center gap-2">
               {user ? (
-                <div className="flex items-center gap-3">
-                  <button onClick={() => { setTab('profile'); window.history.pushState({}, '', '/profil') }} className="rounded-full overflow-hidden w-9 h-9" style={{ border: '2px solid #0F172A' }}>
+                <div className="relative" ref={menuRef}>
+                  {(profile?.is_admin || DEMO_PREVIEW) && (
+                    <button onClick={() => setTab('admin')}
+                      className="mr-2 px-3 py-1.5 rounded-xl text-xs font-semibold"
+                      style={{ background:'#183046', color:'#F1F5F9' }}>
+                      Admin
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setMenuOpen(prev => !prev)}
+                    className="rounded-full overflow-hidden flex items-center justify-center gap-1.5 px-1.5 h-11 transition-transform active:scale-95"
+                    style={{ border: '2px solid #F59E0B', background: '#0F172A' }}
+                    aria-haspopup="true"
+                    aria-expanded={menuOpen}
+                  >
                     {profile?.avatar_url ? (
-                      <img src={profile.avatar_url} alt="avatar" style={{ width:36, height:36, objectFit:'cover' }} />
+                      <img src={profile.avatar_url} alt="Profilbild" style={{ width:40, height:40, objectFit:'cover', borderRadius:999 }} />
                     ) : (
-                      <div style={{ width:36, height:36, display:'flex', alignItems:'center', justifyContent:'center', background:'#334155', color:'#F1F5F9', fontWeight:700 }}>
-                        {(profile?.username ?? user.email?.split('@')[0] ?? '').slice(0,2).toUpperCase()}
+                      <div style={{ width:40, height:40, display:'flex', alignItems:'center', justifyContent:'center', background:'#334155', color:'#F1F5F9', fontWeight:700, fontSize:14, borderRadius:999 }}>
+                        {(profile?.username ?? user.user_metadata?.username ?? user.email?.split('@')[0] ?? '??').slice(0,2).toUpperCase()}
                       </div>
                     )}
+                    <span style={{ color: '#F59E0B', fontSize: 12, lineHeight: 1 }}>⌄</span>
                   </button>
-                  <span className="text-xs hidden sm:block" style={{ color: '#64748B' }}>
-                    {profile?.username ?? user.user_metadata?.username ?? user.email?.split('@')[0]}
-                  </span>
-                  <button onClick={handleSignOut}
-                          className="text-xs px-3 py-1.5 rounded-xl font-semibold transition-all"
-                          style={{ background: '#334155', color: '#94A3B8' }}>
-                    Logga ut
-                  </button>
+
+                  {menuOpen && (
+                    <div className="absolute right-0 top-full mt-3 w-full max-w-[320px] min-w-[260px] rounded-[28px] border border-[#334155] bg-[#0F172A] shadow-[0_20px_60px_rgba(15,23,42,0.35)] p-4 text-sm"
+                         style={{ transition: 'opacity 180ms ease, transform 180ms ease', opacity: 1, transform: 'translateY(0)' }}>
+                      <div className="space-y-4">
+                        <div className="space-y-1">
+                          <p className="text-xs uppercase tracking-[0.18em] text-[#64748B]">Profil</p>
+                          <p className="font-bold text-white">{profile?.username ?? user.user_metadata?.username ?? 'Användare'}</p>
+                          <p className="text-xs text-[#94A3B8]">{user.email}</p>
+                        </div>
+
+                        <div className="grid gap-2 text-xs text-[#CBD5E1]">
+                          <div className="flex items-center justify-between rounded-2xl bg-[#12233B] p-3">
+                            <span>Ranking</span>
+                            <span className="font-semibold text-white">{rankInfo?.position ?? '-'}</span>
+                          </div>
+                          <div className="flex items-center justify-between rounded-2xl bg-[#12233B] p-3">
+                            <span>Poäng</span>
+                            <span className="font-semibold text-white">{rankInfo?.points ?? '-'}</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="text-xs uppercase tracking-[0.18em] text-[#64748B]">Förturneringstips</div>
+                          <div className="space-y-2 rounded-3xl border border-[#334155] bg-[#111827] p-3">
+                            <div className="text-sm text-white font-semibold">Snabböversikt</div>
+                            <div className="space-y-1 text-xs text-[#CBD5E1]">
+                              <div className="flex items-center justify-between gap-2">
+                                <span>🏆 Vinnare av VM</span>
+                                <span className="text-right text-[#F8FAFC]">{vmWinner || 'Ej valt'}</span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2">
+                                <span>⚽ Skyttekung</span>
+                                <span className="text-right text-[#F8FAFC]">{userPredictions.selections?.scorer?.name || 'Ej valt'}</span>
+                              </div>
+                              {userPredictions.selections?.assist?.name && (
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>🎯 Assistkung</span>
+                                  <span className="text-right text-[#F8FAFC]">{userPredictions.selections.assist.name}</span>
+                                </div>
+                              )}
+                              {userPredictions.selections?.yellow?.name && (
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>🟨 Flest gula kort</span>
+                                  <span className="text-right text-[#F8FAFC]">{userPredictions.selections.yellow.name}</span>
+                                </div>
+                              )}
+                              {userPredictions.selections?.red?.name && (
+                                <div className="flex items-center justify-between gap-2">
+                                  <span>🟥 Flest röda kort</span>
+                                  <span className="text-right text-[#F8FAFC]">{userPredictions.selections.red.name}</span>
+                                </div>
+                              )}
+                              {!userPredictions.selections?.scorer?.name && !userPredictions.selections?.assist?.name
+                                && !userPredictions.selections?.yellow?.name && !userPredictions.selections?.red?.name && !vmWinner && (
+                                <p className="text-xs text-[#64748B]">Inga förturneringstips sparade ännu.</p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => { setTab('profile'); window.history.pushState({}, '', '/profil'); setMenuOpen(false) }}
+                            className="w-full rounded-2xl bg-[#F59E0B] px-4 py-2 text-sm font-semibold text-[#0F172A]"
+                          >
+                            Visa profil
+                          </button>
+                          <button
+                            onClick={handleSignOut}
+                            className="w-full rounded-2xl border border-[#334155] bg-[#111827] px-4 py-2 text-sm font-semibold text-[#F1F5F9]"
+                          >
+                            Logga ut
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <button onClick={() => setShowAuth(true)}
@@ -224,7 +407,8 @@ export default function WorldCupApp() {
                 onMouseLeave={e => { if (tab !== t.id) e.currentTarget.style.color = '#64748B' }}
               >
                 <span>{t.icon}</span>
-                <span>{t.label}</span>
+                <span className="hidden sm:inline">{t.label}</span>
+                <span className="sm:hidden">{t.mobileLabel}</span>
               </button>
             ))}
           </div>
@@ -253,24 +437,30 @@ export default function WorldCupApp() {
         )}
 
         {tab === 'groups' && (
-          <GroupStage
-            tips={tips}
-            onTip={handleTip}
-            filledCount={filledCount}
-          />
+          <ErrorBoundary>
+            <GroupStage
+              tips={tips}
+              onTip={handleTip}
+              filledCount={filledCount}
+              user={user}
+            />
+          </ErrorBoundary>
         )}
         {tab === 'bracket' && (
-          <Bracket
-            groupTips={tips}
-            bracketTips={bracketTips}
-            onTip={handleBracketTip}
-            onEditGroups={() => setTab('groups')}
-          />
+          <ErrorBoundary>
+            <Bracket
+              groupTips={tips}
+              bracketTips={bracketTips}
+              onTip={handleBracketTip}
+              onEditGroups={() => setTab('groups')}
+            />
+          </ErrorBoundary>
         )}
-        {tab === 'players'      && <SpelerPredictions user={user} />}
-        {tab === 'leaderboard'  && <Leaderboard groupTips={tips} bracketTips={bracketTips} user={user} />}
-        {tab === 'friends'      && <FriendsRoom groupTips={tips} bracketTips={bracketTips} user={user} />}
-        {tab === 'profile'      && <Profile user={user} onBack={() => { setTab('groups'); window.history.pushState({}, '', '/') }} />}
+        {tab === 'players'      && <ErrorBoundary><SpelerPredictions user={user} /></ErrorBoundary>}
+        {tab === 'leaderboard'  && <ErrorBoundary><Leaderboard groupTips={tips} bracketTips={bracketTips} user={user} /></ErrorBoundary>}
+        {tab === 'friends'      && <ErrorBoundary><FriendsRoom groupTips={tips} bracketTips={bracketTips} user={user} /></ErrorBoundary>}
+        {tab === 'profile'      && <ErrorBoundary><Profile user={user} onBack={() => { setTab('groups'); window.history.pushState({}, '', '/') }} onSignOut={handleSignOut} profile={profile} rankInfo={rankInfo} tips={tips} bracketTips={bracketTips} userPredictions={userPredictions} /></ErrorBoundary>}
+        {tab === 'admin'        && <ErrorBoundary><AdminPanel demo={DEMO_PREVIEW} user={user} profile={profile} /></ErrorBoundary>}
       </div>
     </div>
   )

@@ -1,49 +1,13 @@
 import { useEffect, useState } from 'react'
-import { supabase, getProfile, uploadAvatar, updateProfile, fetchLeaderboard, loadGroupTips, loadBracketPicks, loadPlayerPredictions } from '../lib/supabase'
+import { uploadAvatar, updateProfile, resetPassword } from '../lib/supabase'
 
-export default function Profile({ user, onBack }) {
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+export default function Profile({ user, onBack, onSignOut, profile: profileProp, rankInfo, tips, bracketTips, userPredictions }) {
+  const [profile, setProfile] = useState(profileProp)
   const [uploading, setUploading] = useState(false)
   const [editingName, setEditingName] = useState(false)
   const [nameInput, setNameInput] = useState('')
-  const [rankInfo, setRankInfo] = useState(null)
-  const [groupTips, setGroupTips] = useState({})
-  const [bracketPicks, setBracketPicks] = useState({})
-  const [playerPreds, setPlayerPreds] = useState({ selections: {}, confirmed: {} })
 
-  useEffect(() => {
-    if (!user) return
-    let mounted = true
-    async function load() {
-      setLoading(true)
-      try {
-        const p = await getProfile(user.id)
-        if (!mounted) return
-        setProfile(p)
-
-        const board = await fetchLeaderboard()
-        if (board) {
-          const idx = board.findIndex(b => b.id === p.id)
-          if (idx >= 0) setRankInfo({ pos: idx + 1, total: board.length, pts: board[idx].total_pts })
-        }
-
-        const [g, b, pl] = await Promise.all([
-          loadGroupTips(user.id),
-          loadBracketPicks(user.id),
-          loadPlayerPredictions(user.id)
-        ])
-        if (!mounted) return
-        setGroupTips(g)
-        setBracketPicks(b)
-        setPlayerPreds(pl)
-      } catch (e) {
-        console.warn('Profile load error', e.message)
-      } finally { if (mounted) setLoading(false) }
-    }
-    load()
-    return () => { mounted = false }
-  }, [user])
+  useEffect(() => { setProfile(profileProp) }, [profileProp])
 
   async function handleUpload(e) {
     const f = e.target.files?.[0]
@@ -118,8 +82,8 @@ export default function Profile({ user, onBack }) {
             <div className="mt-4 text-xs text-center" style={{ color:'#64748B' }}>
               {rankInfo ? (
                 <div>
-                  <div>Ranking: <strong style={{ color:'#F59E0B' }}>#{rankInfo.pos}</strong> av {rankInfo.total}</div>
-                  <div>Totala poäng: <strong style={{ color:'#34D399' }}>{rankInfo.pts ?? '0'}</strong></div>
+                  <div>Ranking: <strong style={{ color:'#F59E0B' }}>#{rankInfo.position}</strong>{rankInfo.total ? ` av ${rankInfo.total}` : ''}</div>
+                  <div>Totala poäng: <strong style={{ color:'#34D399' }}>{rankInfo.points ?? '0'}</strong></div>
                 </div>
               ) : (
                 <div>Ranking inte tillgänglig</div>
@@ -156,11 +120,11 @@ export default function Profile({ user, onBack }) {
             <div className="mt-3 space-y-2 text-sm" style={{ color:'#F1F5F9' }}>
               <div>
                 <h4 className="font-semibold" style={{ color:'#F1F5F9' }}>Grupptips</h4>
-                {Object.keys(groupTips).length === 0 ? (
+                {Object.keys(tips ?? {}).length === 0 ? (
                   <p className="text-xs" style={{ color:'#64748B' }}>Inga sparade grupptips</p>
                 ) : (
                   <ul className="mt-2 space-y-1">
-                    {Object.entries(groupTips).map(([match, tip]) => (
+                    {Object.entries(tips ?? {}).map(([match, tip]) => (
                       <li key={match} style={{ color:'#F1F5F9' }}>{match}: {tip}</li>
                     ))}
                   </ul>
@@ -169,11 +133,11 @@ export default function Profile({ user, onBack }) {
 
               <div className="mt-2">
                 <h4 className="font-semibold" style={{ color:'#F1F5F9' }}>Slutspel</h4>
-                {Object.keys(bracketPicks).length === 0 ? (
+                {Object.keys(bracketTips ?? {}).length === 0 ? (
                   <p className="text-xs" style={{ color:'#64748B' }}>Inga bracket-picks</p>
                 ) : (
                   <ul className="mt-2 space-y-1">
-                    {Object.entries(bracketPicks).map(([slot, team]) => (
+                    {Object.entries(bracketTips ?? {}).map(([slot, team]) => (
                       <li key={slot} style={{ color:'#F1F5F9' }}>{slot}: {team}</li>
                     ))}
                   </ul>
@@ -182,11 +146,11 @@ export default function Profile({ user, onBack }) {
 
               <div className="mt-2">
                 <h4 className="font-semibold" style={{ color:'#F1F5F9' }}>Spelare</h4>
-                {Object.keys(playerPreds.selections).length === 0 ? (
+                {Object.keys(userPredictions?.selections ?? {}).length === 0 ? (
                   <p className="text-xs" style={{ color:'#64748B' }}>Inga spelar-tips</p>
                 ) : (
                   <ul className="mt-2 space-y-1">
-                    {Object.entries(playerPreds.selections).map(([cat, sel]) => (
+                    {Object.entries(userPredictions?.selections ?? {}).map(([cat, sel]) => (
                       <li key={cat} style={{ color:'#F1F5F9' }}>{cat}: {sel.name} ({sel.nation})</li>
                     ))}
                   </ul>
@@ -204,10 +168,10 @@ export default function Profile({ user, onBack }) {
               </div>
               <div>
                 <p className="text-xs" style={{ color:'#64748B' }}>Byt lösenord</p>
-                <button onClick={async () => { await supabase.auth.resetPasswordForEmail(user.email) }} className="mt-2 px-3 py-2 rounded" style={{ background:'#334155', color:'#94A3B8' }}>Skicka återställningsmail</button>
+                <button onClick={async () => { await resetPassword(user.email) }} className="mt-2 px-3 py-2 rounded" style={{ background:'#334155', color:'#94A3B8' }}>Skicka återställningsmail</button>
               </div>
               <div>
-                <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/' }} className="mt-2 px-3 py-2 rounded" style={{ background:'#EF4444', color:'#fff' }}>Logga ut</button>
+                <button onClick={onSignOut} className="mt-2 px-3 py-2 rounded" style={{ background:'#EF4444', color:'#fff' }}>Logga ut</button>
               </div>
             </div>
           </div>

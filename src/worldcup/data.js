@@ -259,6 +259,10 @@ export const ALL_KNOCKOUT_IDS = KNOCKOUT_ROUNDS.flatMap(r => r.matches.map(m => 
 
 // ─── Mock världsranking ───────────────────────────────────────────────────────
 
+export const APP_MATCHES_FLAT = Object.values(MATCHES_BY_GROUP).flat()
+
+// ─── Mock världsranking ───────────────────────────────────────────────────────
+
 export const MOCK_LEADERBOARD = [
   {id:1, name:'Carlos M.',  country:'🇧🇷', pts:198},
   {id:2, name:'Sophie L.',  country:'🇫🇷', pts:184},

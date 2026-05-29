@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { MOCK_LEADERBOARD, TOTAL_MATCHES } from './data'
-import { fetchLeaderboard } from '../lib/supabase'
+import { fetchLeaderboard, supabase } from '../lib/supabase'
 
 function calcMyScore(groupTips, bracketTips) {
   return Object.values(groupTips).filter(Boolean).length * 3
@@ -21,11 +21,38 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
 
   useEffect(() => {
     if (!user) return
+
     setLoading(true)
     fetchLeaderboard()
       .then(data => setDbBoard(data))
       .catch(() => setDbBoard(null))
       .finally(() => setLoading(false))
+
+    // Polling var 30:e sekund som fallback om realtid inte levererar
+    const interval = setInterval(() => {
+      fetchLeaderboard()
+        .then(data => setDbBoard(data))
+        .catch(() => {})
+    }, 30_000)
+
+    // Realtidslyssnare: ny fetch direkt när match_results ändras
+    const channel = supabase
+      .channel('match_results_changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'match_results' },
+        () => {
+          fetchLeaderboard()
+            .then(data => setDbBoard(data))
+            .catch(() => {})
+        }
+      )
+      .subscribe()
+
+    return () => {
+      clearInterval(interval)
+      supabase.removeChannel(channel)
+    }
   }, [user])
 
   const myScore = calcMyScore(groupTips, bracketTips)
@@ -47,8 +74,9 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
       medal: i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null,
     }))
 
-  const myEntry = combined.find(u => u.isMe)
-  const tier    = getTier(myScore)
+  const myEntry    = combined.find(u => u.isMe)
+  const displayPts = myEntry?.pts ?? myScore
+  const tier       = getTier(displayPts)
 
   return (
     <div className="space-y-5 max-w-2xl mx-auto">
@@ -78,7 +106,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
         </div>
         <div className="text-right">
           <p className="text-xs" style={{ color: '#94A3B8' }}>POÄNG</p>
-          <p className="text-4xl font-black" style={{ color: '#F59E0B' }}>{myScore}</p>
+          <p className="text-4xl font-black" style={{ color: '#F59E0B' }}>{displayPts}</p>
           <p className="text-xs mt-0.5" style={{ color: '#64748B' }}>
             {Object.values(groupTips).filter(Boolean).length}/{TOTAL_MATCHES} matcher
           </p>
@@ -110,6 +138,13 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
         </div>
 
         <div className="divide-y" style={{ borderColor: '#334155' }}>
+          {combined.length === 0 && (
+            <div className="px-4 py-10 text-center">
+              <p className="text-sm" style={{ color: '#64748B' }}>
+                Inga deltagare ännu – du kan vara den första!
+              </p>
+            </div>
+          )}
           {combined.map(u => {
             const t = getTier(u.pts)
             return (

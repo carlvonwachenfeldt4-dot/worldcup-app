@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Flag from './Flag'
 import { isTournamentStarted } from '../lib/scoreCalculator'
 import { getTopPlayersAll } from '../lib/apiFootball'
@@ -481,23 +481,26 @@ function useLiveStats(enabled) {
   const [stats,       setStats]       = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
   const [loading,     setLoading]     = useState(false)
+  const mounted = useRef(false)
 
   const fetchAll = useCallback(async () => {
     if (!enabled) return
     setLoading(true)
     try {
       const data = await getTopPlayersAll()
+      if (!mounted.current) return
       setStats(data)
       setLastUpdated(new Date())
     } catch (e) {
       console.warn('Livetabeller: kunde inte hämta data', e.message)
     } finally {
-      setLoading(false)
+      if (mounted.current) setLoading(false)
     }
   }, [enabled])
 
   useEffect(() => {
     if (!enabled) return
+    mounted.current = true
     fetchAll()
 
     // Schemalägg nästa poll baserat på om det är matchfönster
@@ -508,7 +511,7 @@ function useLiveStats(enabled) {
       tid = setTimeout(() => { fetchAll(); schedule() }, delay)
     }
     schedule()
-    return () => clearTimeout(tid)
+    return () => { clearTimeout(tid); mounted.current = false }
   }, [enabled, fetchAll])
 
   return { stats, lastUpdated, loading, refetch: fetchAll }

@@ -271,15 +271,15 @@ export function normalizeFixtures(fixtures) {
   return fixtures.map(f => ({
     apiId:     f.fixture.id,
     date:      f.fixture.date,
-    status:    f.fixture.status.short,  // NS/1H/HT/2H/FT etc.
+    status:    f.fixture.status?.short,  // NS/1H/HT/2H/FT etc.
     homeTeam:  f.teams.home.name,
     awayTeam:  f.teams.away.name,
-    homeGoals: f.goals.home,
-    awayGoals: f.goals.away,
+    homeGoals: f.goals?.home,
+    awayGoals: f.goals?.away,
     // Härledd 1X2-vinst för poängberäkning
-    result:    f.goals.home == null ? null
-               : f.goals.home > f.goals.away ? '1'
-               : f.goals.home < f.goals.away ? '2'
+    result:    f.goals?.home == null ? null
+               : f.goals?.home > f.goals?.away ? '1'
+               : f.goals?.home < f.goals?.away ? '2'
                : 'X',
   }))
 }

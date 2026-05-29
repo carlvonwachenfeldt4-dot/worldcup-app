@@ -3,6 +3,7 @@ import { TEAMS, GROUPS, MATCHES_BY_GROUP, TOTAL_MATCHES, calcStandings, formatDt
 import Flag from './Flag'
 import { getCountdown, isMatchSoon, TOURNAMENT_START } from '../lib/scoreCalculator'
 import { fetchTeamLogos } from '../lib/apiFootball'
+import { saveVmWinnerPick } from '../lib/supabase'
 
 // ─── Alla 48 VM-lag för vinnartippning ────────────────────────────────────────
 
@@ -548,7 +549,7 @@ function AllMatchesView({ tips, onTip, openMatch, onToggle, now }) {
 
 // ─── Huvudkomponent: GroupStage ───────────────────────────────────────────────
 
-export default function GroupStage({ tips, onTip, filledCount }) {
+export default function GroupStage({ tips, onTip, filledCount, user }) {
   const [activeGroup, setActiveGroup] = useState('ALL')
   const [openMatch,   setOpenMatch]   = useState(null)
 
@@ -567,8 +568,10 @@ export default function GroupStage({ tips, onTip, filledCount }) {
   }, [vmWinner])
 
   const selectVMWinner = useCallback(name => {
-    setVmWinner(prev => prev === name ? null : name)
-  }, [])
+    const next = name === vmWinner ? null : name
+    setVmWinner(next)
+    if (user && next) saveVmWinnerPick(user.id, next).catch(console.warn)
+  }, [user, vmWinner])
 
   // Klockslag uppdateras var 30:e sekund → matchrader re-renderas och låser sig i realtid
   const [now, setNow] = useState(() => new Date())
