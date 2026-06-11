@@ -1,5 +1,12 @@
 {
   "rewrites": [
     { "source": "/(.*)", "destination": "/" }
-  ]
+  ],
+  "build": {
+    "env": {
+      "VITE_SUPABASE_URL": "@supabase-url",
+      "VITE_SUPABASE_ANON_KEY": "@supabase-anon-key",
+      "VITE_API_FOOTBALL_KEY": "@api-football-key"
+    }
+  }
 }

@@ -321,7 +321,7 @@ export default function AuthModal({ onSuccess, onClose }) {
 
             {mode === 'register' && (
               <p className="text-xs text-center" style={{ color: '#475569' }}>
-                Gratis konto · Dina tips synkroniseras automatiskt
+                Gratis konto · Dina tips synkroniseras automatiskt. Bekräftelsemailet kan hamna i skräpkorgen.
               </p>
             )}
           </form>

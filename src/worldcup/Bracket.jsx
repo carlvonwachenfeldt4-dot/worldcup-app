@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { KNOCKOUT_ROUNDS, formatDt } from './data'
 import Flag from './Flag'
-import { isMatchSoon, getCountdown, TOURNAMENT_START } from '../lib/scoreCalculator'
+import { parseMatchTime, isMatchSoon, getCountdown, TOURNAMENT_START } from '../lib/scoreCalculator'
 import { getKnockoutFixtures } from '../lib/apiFootball'
 
 // ─── Nation (engelska) → iso2 för flag-icons ──────────────────────────────────
@@ -98,7 +98,7 @@ function MatchRow({ slotId, apiMatch, slotDt, seed1, seed2, tip, onTip, expanded
   const awayName = apiMatch?.awayName ?? seed2
   const dt       = apiMatch?.dt ?? slotDt  // API-tid prioriteras
 
-  const locked    = dt ? now >= new Date(dt + ':00+02:00') : false
+  const locked    = dt ? now >= parseMatchTime(dt) : false
   const soon      = !locked && dt ? isMatchSoon(dt, 60) : false
   const countdown = !locked && dt ? getCountdown(dt) : null
   const homeIso   = apiMatch ? iso2(apiMatch.homeName) : null

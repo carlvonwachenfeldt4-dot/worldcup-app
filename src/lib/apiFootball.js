@@ -1,6 +1,8 @@
 // API-Football (api-sports.io) – hämtar riktiga matchresultat för VM 2026
 // Dokumentation: https://www.api-football.com/documentation-v3
 
+import { TEAMS } from '../worldcup/data.js'
+
 const API_KEY  = import.meta.env.VITE_API_FOOTBALL_KEY
 const BASE_URL = 'https://v3.football.api-sports.io'
 const VM_2026_LEAGUE_ID = 1    // FIFA World Cup
@@ -9,31 +11,64 @@ const VM_2026_SEASON    = 2026
 // Cache i minnet för att minska API-anrop (250 req/dag på gratis-tier)
 const cache = new Map()
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
 async function apiFetch(endpoint, params = {}) {
+  if (!API_KEY) {
+    throw new Error('API-Football nyckel saknas. Ställ in VITE_API_FOOTBALL_KEY i miljön.')
+  }
+
   const query  = new URLSearchParams({ league: VM_2026_LEAGUE_ID, season: VM_2026_SEASON, ...params })
   const url    = `${BASE_URL}/${endpoint}?${query}`
   const cacheKey = url
 
   if (cache.has(cacheKey)) return cache.get(cacheKey)
 
-  const res = await fetch(url, {
-    headers: {
-      'x-apisports-key': API_KEY,
-      'x-rapidapi-host': 'v3.football.api-sports.io',
-    },
-  })
+  const maxAttempts = 3
+  let attempt = 0
 
-  if (!res.ok) throw new Error(`API-Football fel: ${res.status}`)
-  const json = await res.json()
+  while (attempt < maxAttempts) {
+    attempt += 1
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'x-apisports-key': API_KEY,
+          'x-rapidapi-host': 'v3.football.api-sports.io',
+        },
+      })
 
-  // Kontrollera API-quotan
-  const remaining = res.headers.get('x-ratelimit-requests-remaining')
-  if (remaining !== null && parseInt(remaining) < 10) {
-    console.warn(`API-Football: ${remaining} anrop kvar idag`)
+      if (res.ok) {
+        const json = await res.json()
+        const remaining = res.headers.get('x-ratelimit-requests-remaining')
+        if (remaining !== null && parseInt(remaining, 10) < 10) {
+          console.warn(`API-Football: ${remaining} anrop kvar idag`)
+        }
+        cache.set(cacheKey, json.response)
+        return json.response
+      }
+
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(`API-Football auktorisering misslyckades (${res.status}). Kontrollera VITE_API_FOOTBALL_KEY.`)
+      }
+
+      if ((res.status === 429 || res.status >= 500) && attempt < maxAttempts) {
+        const retryAfter = parseInt(res.headers.get('retry-after') ?? '', 10)
+        const delay = Number.isFinite(retryAfter) ? retryAfter * 1000 : 1000 * 2 ** (attempt - 1)
+        await sleep(delay)
+        continue
+      }
+
+      throw new Error(`API-Football fel: ${res.status}`)
+    } catch (err) {
+      if (attempt >= maxAttempts) throw err
+      if (err instanceof Error && /auktorisering misslyckades|401|403/.test(err.message)) throw err
+      await sleep(1000 * 2 ** (attempt - 1))
+    }
   }
 
-  cache.set(cacheKey, json.response)
-  return json.response
+  throw new Error('API-Football misslyckades efter flera försök')
 }
 
 // ─── Lagloggor ────────────────────────────────────────────────────────────────
@@ -169,11 +204,20 @@ export async function getStandings() {
 // API-Football round-format: "Round of 32", "Round of 16", etc.
 
 const ROUND_LABELS = {
-  'R32': 'Round of 32',
-  'R16': 'Round of 16',
-  'QF':  'Quarter-finals',
-  'SF':  'Semi-finals',
-  'F':   'Final',
+  'R32': ['round of 32', 'r32', 'round 32', '1/16 final', '1/16-finals', 'last 32', 'round of thirty-two'],
+  'R16': ['round of 16', 'r16', 'round 16', '1/8 final', '1/8-finals', 'last 16', 'round of sixteen'],
+  'QF':  ['quarter-finals', 'quarterfinals', 'qf', 'quarter final', 'quarter final'],
+  'SF':  ['semi-finals', 'semifinals', 'sf', 'semi final', 'semi final'],
+  'F':   ['final', 'f'],
+}
+
+function resolveRoundId(rawRound) {
+  if (!rawRound) return null
+  const normalized = String(rawRound).trim().toLowerCase()
+  for (const [roundId, labels] of Object.entries(ROUND_LABELS)) {
+    if (labels.some(label => normalized.includes(label))) return roundId
+  }
+  return null
 }
 
 // Hämtar faktiska slutspelsfixtures från API-Football.
@@ -195,8 +239,8 @@ export async function getKnockoutFixtures() {
 
   const rounds = {}
   for (const f of fixtures) {
-    const apiRound = f.league?.round ?? ''
-    const roundId  = Object.entries(ROUND_LABELS).find(([, lbl]) => apiRound === lbl)?.[0]
+    const apiRound = f.league?.round ?? f.league?.stage ?? f.fixture?.round ?? ''
+    const roundId  = resolveRoundId(apiRound)
     if (!roundId) continue
 
     if (!rounds[roundId]) rounds[roundId] = []
@@ -287,17 +331,30 @@ export function normalizeFixtures(fixtures) {
 // ─── Matcha API-fixture mot appens matchId ────────────────────────────────────
 // Används för att räkna ut om ett tips var rätt
 
+const normalizeId = str => String(str ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
+
 export function matchApiToAppId(apiFixtures, appMatches) {
   const result = {}
   for (const appMatch of appMatches) {
-    const home = appMatch.home
-    const away = appMatch.away
-    // Hitta motsvarande API-fixture via lag och datum
+    const appHomeName = normalizeId(TEAMS[appMatch.home]?.name ?? appMatch.home)
+    const appAwayName = normalizeId(TEAMS[appMatch.away]?.name ?? appMatch.away)
+    const appHomeCode = normalizeId(appMatch.home)
+    const appAwayCode = normalizeId(appMatch.away)
+
     const apiFix = apiFixtures.find(f => {
-      const h = f.teams.home.name.toLowerCase()
-      const a = f.teams.away.name.toLowerCase()
-      return (h.includes(home.toLowerCase()) || home.toLowerCase().includes(h)) &&
-             (a.includes(away.toLowerCase()) || away.toLowerCase().includes(a))
+      const apiHomeName = normalizeId(API_TO_SWEDISH[f.teams.home.name] ?? f.teams.home.name)
+      const apiAwayName = normalizeId(API_TO_SWEDISH[f.teams.away.name] ?? f.teams.away.name)
+      const apiHomeCode = normalizeId(f.teams.home.code ?? '')
+      const apiAwayCode = normalizeId(f.teams.away.code ?? '')
+
+      const homeMatch = apiHomeCode && apiHomeCode === appHomeCode
+        ? true
+        : apiHomeName === appHomeName || apiHomeName.includes(appHomeName) || appHomeName.includes(apiHomeName)
+      const awayMatch = apiAwayCode && apiAwayCode === appAwayCode
+        ? true
+        : apiAwayName === appAwayName || apiAwayName.includes(appAwayName) || appAwayName.includes(apiAwayName)
+
+      return homeMatch && awayMatch
     })
     if (apiFix) result[appMatch.id] = apiFix
   }

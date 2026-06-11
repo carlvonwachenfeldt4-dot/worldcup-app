@@ -44,10 +44,10 @@ export default function LockedPredictions({ userId }) {
         try {
           const { data } = await supabase
             .from('vm_picks')
-            .select('team_name')
+            .select('vm_winner')
             .eq('user_id', userId)
             .single()
-          vmWinner = data?.team_name || null
+          vmWinner = data?.vm_winner || null
         } catch {
           // Fallback: hämta från localStorage
           vmWinner = localStorage.getItem('vmWinner')

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { TEAMS, GROUPS, MATCHES_BY_GROUP, TOTAL_MATCHES, calcStandings, formatDt } from './data'
 import Flag from './Flag'
-import { getCountdown, isMatchSoon, TOURNAMENT_START } from '../lib/scoreCalculator'
+import { getCountdown, isMatchSoon, parseMatchTime, TOURNAMENT_START } from '../lib/scoreCalculator'
 import { fetchTeamLogos } from '../lib/apiFootball'
 import { saveVmWinnerPick } from '../lib/supabase'
 
@@ -96,7 +96,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
   const dateStr = formatDt(match.dt)
 
   // Härledd lock-status baserad på now (re-renderas när föräldern uppdaterar now)
-  const locked  = now >= new Date(match.dt + ':00+02:00')
+  const locked  = now >= parseMatchTime(match.dt)
   const soon    = !locked && isMatchSoon(match.dt, 60)
   const countdown = !locked ? getCountdown(match.dt) : null
 
@@ -549,29 +549,26 @@ function AllMatchesView({ tips, onTip, openMatch, onToggle, now }) {
 
 // ─── Huvudkomponent: GroupStage ───────────────────────────────────────────────
 
-export default function GroupStage({ tips, onTip, filledCount, user }) {
+export default function GroupStage({ tips, onTip, filledCount, user, vmWinner, onVmWinnerChange }) {
   const [activeGroup, setActiveGroup] = useState('ALL')
   const [openMatch,   setOpenMatch]   = useState(null)
+  const [saveError,   setSaveError]   = useState(null)
 
   // Lagloggor från API-Football (cachas 24h)
   const teamLogos = useTeamLogos()
 
-  // VM-vinnare: ett lagnamn eller null
-  const [vmWinner, setVmWinner] = useState(() => {
-    try { return localStorage.getItem('vmWinner') ?? null }
-    catch { return null }
-  })
-
-  useEffect(() => {
-    if (vmWinner) localStorage.setItem('vmWinner', vmWinner)
-    else          localStorage.removeItem('vmWinner')
-  }, [vmWinner])
-
   const selectVMWinner = useCallback(name => {
     const next = name === vmWinner ? null : name
-    setVmWinner(next)
-    if (user && next) saveVmWinnerPick(user.id, next).catch(console.warn)
-  }, [user, vmWinner])
+    if (onVmWinnerChange) onVmWinnerChange(next)
+    setSaveError(null)
+    if (user) {
+      saveVmWinnerPick(user.id, next)
+        .catch(err => {
+          setSaveError('VM-vinnartippningen kunde inte sparas – kontrollera uppkopplingen och försök igen.')
+          console.warn(err)
+        })
+    }
+  }, [user, vmWinner, onVmWinnerChange])
 
   // Klockslag uppdateras var 30:e sekund → matchrader re-renderas och låser sig i realtid
   const [now, setNow] = useState(() => new Date())
@@ -629,7 +626,16 @@ export default function GroupStage({ tips, onTip, filledCount, user }) {
 
       {/* Innehåll */}
       {activeGroup === 'WINNER' ? (
+        <>
         <VMWinnerSection vmWinner={vmWinner} onSelect={selectVMWinner} logos={teamLogos} />
+        {saveError && (
+          <div className="rounded-2xl px-4 py-3 mt-4 flex items-center justify-between gap-3"
+               style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)' }}>
+            <p className="text-sm" style={{ color:'#F87171' }}>⚠️ {saveError}</p>
+            <button onClick={() => setSaveError(null)} className="shrink-0 text-lg leading-none" style={{ color: '#64748B' }}>×</button>
+          </div>
+        )}
+      </>
       ) : activeGroup === 'ALL' ? (
         <AllMatchesView tips={tips} onTip={onTip} openMatch={openMatch} onToggle={toggle} now={now} />
       ) : (

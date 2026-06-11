@@ -61,21 +61,88 @@ CREATE TABLE IF NOT EXISTS public.player_predictions (
   UNIQUE (user_id, category)
 );
 
+-- Server-side conflictkontroll för egna sparade rader.
+-- Om ett senare sparförsök redan har uppdaterat raden, ignoreras den föråldrade skrivningen.
+CREATE OR REPLACE FUNCTION public.safe_save_group_tip(
+  p_user_id UUID,
+  p_match_id TEXT,
+  p_tip TEXT
+)
+RETURNS SETOF public.group_tips
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO public.group_tips (user_id, match_id, tip, updated_at)
+  VALUES (p_user_id, p_match_id, p_tip, NOW())
+  ON CONFLICT (user_id, match_id)
+  DO UPDATE SET tip = EXCLUDED.tip, updated_at = NOW()
+  RETURNING *;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.safe_save_bracket_pick(
+  p_user_id UUID,
+  p_slot_id TEXT,
+  p_team_id TEXT
+)
+RETURNS SETOF public.bracket_picks
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO public.bracket_picks (user_id, slot_id, team_id, updated_at)
+  VALUES (p_user_id, p_slot_id, p_team_id, NOW())
+  ON CONFLICT (user_id, slot_id)
+  DO UPDATE SET team_id = EXCLUDED.team_id, updated_at = NOW()
+  RETURNING *;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.safe_save_player_prediction(
+  p_user_id UUID,
+  p_category TEXT,
+  p_player_name TEXT,
+  p_player_nation TEXT,
+  p_confirmed BOOLEAN
+)
+RETURNS SETOF public.player_predictions
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO public.player_predictions (user_id, category, player_name, player_nation, confirmed, updated_at)
+  VALUES (p_user_id, p_category, p_player_name, p_player_nation, p_confirmed, NOW())
+  ON CONFLICT (user_id, category)
+  DO UPDATE SET
+    player_name = EXCLUDED.player_name,
+    player_nation = EXCLUDED.player_nation,
+    confirmed = EXCLUDED.confirmed,
+    updated_at = NOW()
+  RETURNING *;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.safe_save_vm_winner_pick(
+  p_user_id UUID,
+  p_vm_winner TEXT
+)
+RETURNS SETOF public.vm_picks
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO public.vm_picks (user_id, vm_winner, updated_at)
+  VALUES (p_user_id, btrim(p_vm_winner), NOW())
+  ON CONFLICT (user_id)
+  DO UPDATE SET vm_winner = btrim(EXCLUDED.vm_winner), updated_at = NOW()
+  RETURNING *;
+END;
+$$;
+
 -- ─── 5. Vännerrum ────────────────────────────────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS public.friend_rooms (
-  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  code        CHAR(6) UNIQUE NOT NULL,
-  created_by  UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE IF NOT EXISTS public.room_members (
-  room_id    UUID NOT NULL REFERENCES public.friend_rooms(id) ON DELETE CASCADE,
-  user_id    UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-  joined_at  TIMESTAMPTZ DEFAULT NOW(),
-  PRIMARY KEY (room_id, user_id)
-);
+-- Private rum och gruppfunktioner har tagits bort. Ingen vänlista används längre.
 
 -- ─── 6. Leaderboard-vy ───────────────────────────────────────────────────────
 -- Beräknar poäng per användare baserat på korrekta tips mot faktiska resultat.
@@ -139,8 +206,6 @@ ALTER TABLE public.profiles           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.group_tips         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bracket_picks      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.player_predictions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.friend_rooms       ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.room_members       ENABLE ROW LEVEL SECURITY;
 
 -- Profiler
 DROP POLICY IF EXISTS "Profiler synliga för alla"   ON public.profiles;
@@ -150,6 +215,7 @@ DROP POLICY IF EXISTS "Uppdatera egen profil"       ON public.profiles;
 CREATE POLICY "Profiler synliga för alla"   ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Skapa egen profil"           ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
 CREATE POLICY "Uppdatera egen profil"       ON public.profiles FOR UPDATE USING (auth.uid() = id);
+CREATE POLICY "Radera egen profil"          ON public.profiles FOR DELETE USING (auth.uid() = id);
 
 -- Grupptips
 DROP POLICY IF EXISTS "Alla kan läsa grupptips"     ON public.group_tips;
@@ -157,7 +223,7 @@ DROP POLICY IF EXISTS "Egna grupptips: insert"      ON public.group_tips;
 DROP POLICY IF EXISTS "Egna grupptips: update"      ON public.group_tips;
 DROP POLICY IF EXISTS "Egna grupptips: delete"      ON public.group_tips;
 
-CREATE POLICY "Alla kan läsa grupptips"     ON public.group_tips FOR SELECT USING (true);
+CREATE POLICY "Alla kan läsa grupptips"     ON public.group_tips FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Egna grupptips: insert"      ON public.group_tips FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Egna grupptips: update"      ON public.group_tips FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Egna grupptips: delete"      ON public.group_tips FOR DELETE USING (auth.uid() = user_id);
@@ -168,7 +234,7 @@ DROP POLICY IF EXISTS "Egna bracket: insert"        ON public.bracket_picks;
 DROP POLICY IF EXISTS "Egna bracket: update"        ON public.bracket_picks;
 DROP POLICY IF EXISTS "Egna bracket: delete"        ON public.bracket_picks;
 
-CREATE POLICY "Alla kan läsa bracket"       ON public.bracket_picks FOR SELECT USING (true);
+CREATE POLICY "Alla kan läsa bracket"       ON public.bracket_picks FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Egna bracket: insert"        ON public.bracket_picks FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Egna bracket: update"        ON public.bracket_picks FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Egna bracket: delete"        ON public.bracket_picks FOR DELETE USING (auth.uid() = user_id);
@@ -182,22 +248,6 @@ CREATE POLICY "Egna spelartips: select"     ON public.player_predictions FOR SEL
 CREATE POLICY "Egna spelartips: insert"     ON public.player_predictions FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Egna spelartips: update"     ON public.player_predictions FOR UPDATE USING (auth.uid() = user_id);
 
--- Vännerrum
-DROP POLICY IF EXISTS "Rum synliga för alla"        ON public.friend_rooms;
-DROP POLICY IF EXISTS "Inloggade kan skapa rum"     ON public.friend_rooms;
-
-CREATE POLICY "Rum synliga för alla"        ON public.friend_rooms FOR SELECT USING (true);
-CREATE POLICY "Inloggade kan skapa rum"     ON public.friend_rooms FOR INSERT WITH CHECK (auth.uid() = created_by);
-
--- Rumsmedlemmar
-DROP POLICY IF EXISTS "Rumsmedlemmar synliga"       ON public.room_members;
-DROP POLICY IF EXISTS "Gå med i rum"               ON public.room_members;
-DROP POLICY IF EXISTS "Lämna rum"                  ON public.room_members;
-
-CREATE POLICY "Rumsmedlemmar synliga"       ON public.room_members FOR SELECT USING (true);
-CREATE POLICY "Gå med i rum"               ON public.room_members FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Lämna rum"                  ON public.room_members FOR DELETE USING (auth.uid() = user_id);
-
 -- ─── 8. Server-side matchlåsning ────────────────────────────────────────────
 -- Triggerfunction som kastar fel om turneringen redan har startat.
 -- Skyddar group_tips, bracket_picks och player_predictions mot sena tips
@@ -205,8 +255,25 @@ CREATE POLICY "Lämna rum"                  ON public.room_members FOR DELETE US
 
 CREATE OR REPLACE FUNCTION public.prevent_late_tips()
 RETURNS TRIGGER AS $$
+DECLARE
+  match_start TIMESTAMPTZ;
 BEGIN
-  -- Turneringen startar 2026-06-11 19:00 UTC (21:00 CEST)
+  IF TG_TABLE_NAME = 'group_tips' THEN
+    SELECT starts_at INTO match_start
+      FROM public.group_match_schedule
+     WHERE match_id = NEW.match_id;
+
+    IF match_start IS NULL THEN
+      RAISE EXCEPTION 'Matchstart saknas för match %', NEW.match_id;
+    END IF;
+
+    IF NOW() >= match_start THEN
+      RAISE EXCEPTION 'Tippningen är stängd för match % – den har startat', NEW.match_id;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- Övriga typer av tips stängs vid turneringsstart.
   IF NOW() >= TIMESTAMPTZ '2026-06-11T19:00:00Z' THEN
     RAISE EXCEPTION 'Tippningen är stängd – turneringen har startat';
   END IF;
@@ -214,7 +281,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Applicera triggern på alla tre tipstabeller
+-- Applicera triggern på alla tipstabeller
 DROP TRIGGER IF EXISTS check_tip_time ON public.group_tips;
 CREATE TRIGGER check_tip_time
   BEFORE INSERT OR UPDATE ON public.group_tips
@@ -253,6 +320,11 @@ ALTER TABLE public.profiles
 ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- Matchresultat (canonical results skrivs av server‑sync)
+CREATE INDEX IF NOT EXISTS idx_group_tips_user_id ON public.group_tips (user_id);
+CREATE INDEX IF NOT EXISTS idx_group_tips_match_id ON public.group_tips (match_id);
+CREATE INDEX IF NOT EXISTS idx_bracket_picks_user_id ON public.bracket_picks (user_id);
+CREATE INDEX IF NOT EXISTS idx_player_preds_user_id ON public.player_predictions (user_id);
+
 CREATE TABLE IF NOT EXISTS public.match_results (
   id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   match_id    TEXT UNIQUE NOT NULL,       -- t.ex. "A1", "F3"
@@ -278,6 +350,90 @@ CREATE POLICY "Matchresults admin update" ON public.match_results FOR UPDATE USI
   (SELECT coalesce(is_admin, false) FROM public.profiles WHERE id = auth.uid()) = true
 );
 
+-- Gruppmatch-schema för matchspecifik låsning av group_tips.
+CREATE TABLE IF NOT EXISTS public.group_match_schedule (
+  match_id TEXT PRIMARY KEY,
+  starts_at TIMESTAMPTZ NOT NULL
+);
+
+ALTER TABLE public.group_match_schedule ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Match schedule select" ON public.group_match_schedule FOR SELECT USING (true);
+
+INSERT INTO public.group_match_schedule (match_id, starts_at) VALUES
+  ('A1','2026-06-11T21:00:00+02:00'),
+  ('A2','2026-06-12T04:00:00+02:00'),
+  ('A3','2026-06-19T03:00:00+02:00'),
+  ('A4','2026-06-19T06:00:00+02:00'),
+  ('A5','2026-06-25T03:00:00+02:00'),
+  ('A6','2026-06-25T03:00:00+02:00'),
+  ('B1','2026-06-12T21:00:00+02:00'),
+  ('B2','2026-06-13T21:00:00+02:00'),
+  ('B3','2026-06-18T21:00:00+02:00'),
+  ('B4','2026-06-19T00:00:00+02:00'),
+  ('B5','2026-06-24T21:00:00+02:00'),
+  ('B6','2026-06-24T21:00:00+02:00'),
+  ('C1','2026-06-14T00:00:00+02:00'),
+  ('C2','2026-06-14T03:00:00+02:00'),
+  ('C3','2026-06-20T00:00:00+02:00'),
+  ('C4','2026-06-20T02:30:00+02:00'),
+  ('C5','2026-06-25T00:00:00+02:00'),
+  ('C6','2026-06-25T00:00:00+02:00'),
+  ('D1','2026-06-13T03:00:00+02:00'),
+  ('D2','2026-06-14T06:00:00+02:00'),
+  ('D3','2026-06-19T21:00:00+02:00'),
+  ('D4','2026-06-20T05:00:00+02:00'),
+  ('D5','2026-06-26T04:00:00+02:00'),
+  ('D6','2026-06-26T04:00:00+02:00'),
+  ('E1','2026-06-14T19:00:00+02:00'),
+  ('E2','2026-06-15T01:00:00+02:00'),
+  ('E3','2026-06-20T22:00:00+02:00'),
+  ('E4','2026-06-21T02:00:00+02:00'),
+  ('E5','2026-06-25T22:00:00+02:00'),
+  ('E6','2026-06-25T22:00:00+02:00'),
+  ('F1','2026-06-14T22:00:00+02:00'),
+  ('F2','2026-06-15T04:00:00+02:00'),
+  ('F3','2026-06-20T19:00:00+02:00'),
+  ('F4','2026-06-21T06:00:00+02:00'),
+  ('F5','2026-06-26T01:00:00+02:00'),
+  ('F6','2026-06-26T01:00:00+02:00'),
+  ('G1','2026-06-15T21:00:00+02:00'),
+  ('G2','2026-06-16T03:00:00+02:00'),
+  ('G3','2026-06-21T21:00:00+02:00'),
+  ('G4','2026-06-22T03:00:00+02:00'),
+  ('G5','2026-06-27T03:00:00+02:00'),
+  ('G6','2026-06-27T03:00:00+02:00'),
+  ('H1','2026-06-15T18:00:00+02:00'),
+  ('H2','2026-06-16T00:00:00+02:00'),
+  ('H3','2026-06-21T18:00:00+02:00'),
+  ('H4','2026-06-22T00:00:00+02:00'),
+  ('H5','2026-06-27T02:00:00+02:00'),
+  ('H6','2026-06-27T02:00:00+02:00'),
+  ('I1','2026-06-16T21:00:00+02:00'),
+  ('I2','2026-06-17T00:00:00+02:00'),
+  ('I3','2026-06-22T23:00:00+02:00'),
+  ('I4','2026-06-23T02:00:00+02:00'),
+  ('I5','2026-06-26T21:00:00+02:00'),
+  ('I6','2026-06-26T21:00:00+02:00'),
+  ('J1','2026-06-17T03:00:00+02:00'),
+  ('J2','2026-06-17T06:00:00+02:00'),
+  ('J3','2026-06-22T19:00:00+02:00'),
+  ('J4','2026-06-23T05:00:00+02:00'),
+  ('J5','2026-06-28T04:00:00+02:00'),
+  ('J6','2026-06-28T04:00:00+02:00'),
+  ('K1','2026-06-17T19:00:00+02:00'),
+  ('K2','2026-06-18T04:00:00+02:00'),
+  ('K3','2026-06-23T19:00:00+02:00'),
+  ('K4','2026-06-24T04:00:00+02:00'),
+  ('K5','2026-06-28T01:30:00+02:00'),
+  ('K6','2026-06-28T01:30:00+02:00'),
+  ('L1','2026-06-17T22:00:00+02:00'),
+  ('L2','2026-06-18T01:00:00+02:00'),
+  ('L3','2026-06-23T22:00:00+02:00'),
+  ('L4','2026-06-24T01:00:00+02:00'),
+  ('L5','2026-06-28T21:00:00+02:00'),
+  ('L6','2026-06-28T21:00:00+02:00')
+ON CONFLICT (match_id) DO NOTHING;
+
 -- Spelarstatistik (toppskytt, assistkung, kortstatistik) – skrivs av server‑sync
 CREATE TABLE IF NOT EXISTS public.player_stats (
   id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -288,6 +444,9 @@ CREATE TABLE IF NOT EXISTS public.player_stats (
   value         INT DEFAULT 0,
   updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.player_stats
+  ADD CONSTRAINT IF NOT EXISTS player_stats_category_name_unique UNIQUE (category, player_name);
 
 ALTER TABLE public.player_stats ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Playerstats select" ON public.player_stats FOR SELECT USING (true);
@@ -307,9 +466,10 @@ CREATE TABLE IF NOT EXISTS public.vm_picks (
 );
 
 ALTER TABLE public.vm_picks ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Vinnarpicks select" ON public.vm_picks FOR SELECT USING (true);
+CREATE POLICY "Vinnarpicks select" ON public.vm_picks FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Vinnarpicks own upsert" ON public.vm_picks FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Vinnarpicks own update" ON public.vm_picks FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Vinnarpicks own delete" ON public.vm_picks FOR DELETE USING (auth.uid() = user_id);
 
 -- Spara turneringens officiella vinnare (endast admin/server skriver)
 CREATE TABLE IF NOT EXISTS public.tournament_results (
@@ -349,7 +509,7 @@ LEFT JOIN (
   GROUP BY gt.user_id
 ) m ON m.user_id = p.id
 LEFT JOIN (
-  SELECT user_id, COUNT(*) * 2 AS bracket_pts FROM public.bracket_picks GROUP BY user_id
+  SELECT user_id, COUNT(team_id) * 2 AS bracket_pts FROM public.bracket_picks GROUP BY user_id
 ) b ON b.user_id = p.id
 LEFT JOIN (
   SELECT pp.user_id,
@@ -371,5 +531,72 @@ LEFT JOIN (
   LEFT JOIN public.tournament_results tr ON tr.id = 1
   GROUP BY vp.user_id
 ) v ON v.user_id = p.id
+WHERE (
+  EXISTS (SELECT 1 FROM public.group_tips gt WHERE gt.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.bracket_picks bp WHERE bp.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.player_predictions pp WHERE pp.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.vm_picks vp WHERE vp.user_id = p.id)
+)
 ORDER BY total_pts DESC;
+
+CREATE OR REPLACE FUNCTION public.get_leaderboard()
+RETURNS TABLE(
+  id UUID,
+  username TEXT,
+  match_pts INT,
+  bracket_pts INT,
+  player_pts INT,
+  vm_pts INT,
+  total_pts INT
+)
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+SELECT
+  p.id,
+  p.username,
+  COALESCE(m.match_pts, 0)       AS match_pts,
+  COALESCE(b.bracket_pts, 0)    AS bracket_pts,
+  COALESCE(pl.player_pts, 0)    AS player_pts,
+  COALESCE(v.vm_pts, 0)         AS vm_pts,
+  COALESCE(m.match_pts, 0) + COALESCE(b.bracket_pts, 0) + COALESCE(pl.player_pts, 0) + COALESCE(v.vm_pts, 0) AS total_pts
+FROM public.profiles p
+LEFT JOIN (
+  SELECT gt.user_id,
+         SUM(CASE WHEN gt.tip IS NOT NULL AND mr.result IS NOT NULL AND gt.tip = mr.result THEN 3 ELSE 0 END) AS match_pts
+  FROM public.group_tips gt
+  LEFT JOIN public.match_results mr ON gt.match_id = mr.match_id
+  GROUP BY gt.user_id
+) m ON m.user_id = p.id
+LEFT JOIN (
+  SELECT user_id, COUNT(team_id) * 2 AS bracket_pts FROM public.bracket_picks GROUP BY user_id
+) b ON b.user_id = p.id
+LEFT JOIN (
+  SELECT pp.user_id,
+    SUM(
+      CASE
+        WHEN pp.category = 'scorer' AND lower(pp.player_name) = lower(ps.player_name) THEN 10
+        WHEN pp.category = 'assist' AND lower(pp.player_name) = lower(ps.player_name) THEN 12
+        WHEN pp.category = 'yellow' AND lower(pp.player_name) = lower(ps.player_name) THEN 8
+        WHEN pp.category = 'red' AND lower(pp.player_name) = lower(ps.player_name) THEN 10
+        ELSE 0 END
+    ) AS player_pts
+  FROM public.player_predictions pp
+  LEFT JOIN public.player_stats ps ON lower(pp.player_name) = lower(ps.player_name) AND pp.category = ps.category
+  GROUP BY pp.user_id
+) pl ON pl.user_id = p.id
+LEFT JOIN (
+  SELECT vp.user_id, SUM(CASE WHEN lower(vp.vm_winner) = lower(tr.winner) THEN 20 ELSE 0 END) AS vm_pts
+  FROM public.vm_picks vp
+  LEFT JOIN public.tournament_results tr ON tr.id = 1
+  GROUP BY vp.user_id
+) v ON v.user_id = p.id
+WHERE (
+  EXISTS (SELECT 1 FROM public.group_tips gt WHERE gt.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.bracket_picks bp WHERE bp.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.player_predictions pp WHERE pp.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.vm_picks vp WHERE vp.user_id = p.id)
+)
+ORDER BY total_pts DESC;
+$$;
 

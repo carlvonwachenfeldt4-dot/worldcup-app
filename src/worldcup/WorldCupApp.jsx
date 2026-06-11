@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TOTAL_MATCHES } from './data'
-import { supabase, signOut, getSession, loadGroupTips, saveGroupTip, deleteGroupTip,
-         loadBracketPicks, saveBracketPick, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI } from '../lib/supabase'
+import { supabase, signOut, loadGroupTips, saveGroupTip, deleteGroupTip,
+         loadBracketPicks, saveBracketPick, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, loadVmWinnerPick } from '../lib/supabase'
 import GroupStage        from './GroupStage'
 import Bracket           from './Bracket'
 import Leaderboard       from './Leaderboard'
-import FriendsRoom       from './FriendsRoom'
 import SpelerPredictions from './SpelerPredictions'
 import AuthModal         from './AuthModal'
 import Profile           from './Profile'
@@ -22,13 +21,13 @@ const TABS = [
   { id:'bracket',     label:'Slutspel',               mobileLabel:'Slutspel',icon:'🏆' },
   { id:'players',     label:'Spelare',                mobileLabel:'Spelare', icon:'⚽' },
   { id:'leaderboard', label:'Ranking',                mobileLabel:'Ranking', icon:'🌍' },
-  { id:'friends',     label:'Vänner',                 mobileLabel:'Vänner',  icon:'👥' },
 ]
 
+const DEMO_PREVIEW = typeof window !== 'undefined'
+  && window.location.hostname === 'localhost'
+  && new URLSearchParams(window.location.search).get('demo') === '1'
+
 export default function WorldCupApp() {
-  const DEMO_PREVIEW = typeof window !== 'undefined'
-    && window.location.hostname === 'localhost'
-    && new URLSearchParams(window.location.search).get('demo') === '1'
   const DEMO_USER = {
     id: 'demo-user',
     email: 'demo@localhost',
@@ -59,7 +58,13 @@ export default function WorldCupApp() {
     try { return localStorage.getItem('vmWinner') ?? null }
     catch { return null }
   })
-  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuOpen,         setMenuOpen]         = useState(false)
+  const [showPasswordReset, setShowPasswordReset] = useState(false)
+  const [newPassword,       setNewPassword]       = useState('')
+  const [resetLoading,      setResetLoading]      = useState(false)
+  const [resetError,        setResetError]        = useState(null)
+  const [saveError,         setSaveError]         = useState(null)
+  const [syncing,           setSyncing]           = useState(false)
   const menuRef = useRef(null)
   const tipDebounce = useRef({})
 
@@ -82,16 +87,20 @@ export default function WorldCupApp() {
       setAuthReady(true)
       return
     }
-    getSession().then(session => {
-      setUser(session?.user ?? null)
-      setAuthReady(true)
-      if (session?.user) syncFromSupabase(session.user.id)
-    })
+    let authReadyTimeout = setTimeout(() => setAuthReady(true), 8000)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (_event === 'PASSWORD_RECOVERY') { setShowPasswordReset(true); return }
+      if (_event === 'INITIAL_SESSION') {
+        clearTimeout(authReadyTimeout)
+        setAuthReady(true)
+      }
       setUser(session?.user ?? null)
       if (session?.user) syncFromSupabase(session.user.id)
     })
-    return () => subscription.unsubscribe()
+    return () => {
+      clearTimeout(authReadyTimeout)
+      subscription.unsubscribe()
+    }
   }, [])
 
   // ─── Matchresultat-sync från API-Football ─────────────────────────────────
@@ -103,19 +112,20 @@ export default function WorldCupApp() {
     const syncInterval = setInterval(() => {
       syncMatchResultsFromAPI()
       syncPlayerStatsFromAPI()
-    }, 15 * 60 * 1000)
+    }, 60 * 60 * 1000) // max 1 sync/timme i samma admin-session
     return () => clearInterval(syncInterval)
-  }, [profile])
+  }, [profile?.is_admin, profile?.id])
 
   useEffect(() => {
     let mounted = true
     async function loadProfile() {
       if (!user) { setProfile(null); setUserPredictions({ selections: {}, confirmed: {} }); setVmWinner(null); return }
       try {
-        const [p, predictions, leaderboard] = await Promise.all([
+        const [p, predictions, leaderboard, dbVmWinner] = await Promise.all([
           getProfile(user.id),
           loadPlayerPredictions(user.id),
           fetchLeaderboard(),
+          loadVmWinnerPick(user.id),
         ])
         if (!mounted) return
         setProfile(p)
@@ -126,10 +136,8 @@ export default function WorldCupApp() {
           points: leaderboard[index]?.total_pts ?? 0,
           total: leaderboard.length,
         } : null)
-        setVmWinner(() => {
-          try { return localStorage.getItem('vmWinner') ?? null }
-          catch { return null }
-        })
+        const localVmWinner = (() => { try { return localStorage.getItem('vmWinner') ?? null } catch { return null } })()
+        setVmWinner(dbVmWinner ?? localVmWinner)
       } catch (e) {
         console.warn('Could not load profile, predictions or ranking', e.message)
       }
@@ -147,6 +155,15 @@ export default function WorldCupApp() {
       }
     }
   }, [user])
+
+  useEffect(() => {
+    if (vmWinner) localStorage.setItem('vmWinner', vmWinner)
+    else localStorage.removeItem('vmWinner')
+  }, [vmWinner])
+
+  function handleVmWinnerChange(next) {
+    setVmWinner(next)
+  }
 
   useEffect(() => {
     function handleClickOutside(event) {
@@ -168,17 +185,18 @@ export default function WorldCupApp() {
   }, [menuOpen])
 
   async function syncFromSupabase(userId) {
+    setSyncing(true)
     try {
-      const [dbTips, dbBracket, predictions] = await Promise.all([
+      const [dbTips, dbBracket] = await Promise.all([
         loadGroupTips(userId),
         loadBracketPicks(userId),
-        loadPlayerPredictions(userId),
       ])
-      setTips(prev => ({ ...prev, ...dbTips }))
-      setBracketTips(prev => ({ ...prev, ...dbBracket }))
-      setUserPredictions(predictions)
+      setTips(dbTips ?? {})
+      setBracketTips(dbBracket ?? {})
     } catch (err) {
       console.warn('Kunde inte ladda från Supabase:', err.message)
+    } finally {
+      setSyncing(false)
     }
   }
 
@@ -192,8 +210,10 @@ export default function WorldCupApp() {
     if (user) {
       clearTimeout(tipDebounce.current[matchId])
       tipDebounce.current[matchId] = setTimeout(() => {
-        if (val) saveGroupTip(user.id, matchId, val).catch(console.warn)
-        else     deleteGroupTip(user.id, matchId).catch(console.warn)
+        const op = val
+          ? saveGroupTip(user.id, matchId, val)
+          : deleteGroupTip(user.id, matchId)
+        op.catch(() => setSaveError('Tipset kunde inte sparas – kontrollera uppkopplingen och försök igen.'))
       }, 600)
     }
   }, [user])
@@ -202,7 +222,8 @@ export default function WorldCupApp() {
   const handleBracketTip = useCallback((matchId, val) => {
     setBracketTips(prev => ({ ...prev, [matchId]: val }))
     if (user) {
-      saveBracketPick(user.id, matchId, val).catch(console.warn)
+      saveBracketPick(user.id, matchId, val)
+        .catch(() => setSaveError('Tipset kunde inte sparas – kontrollera uppkopplingen och försök igen.'))
     }
   }, [user])
 
@@ -216,6 +237,22 @@ export default function WorldCupApp() {
     setVmWinner(null)
     setTab('groups')
     window.history.pushState({}, '', '/')
+  }
+
+  async function handlePasswordReset(e) {
+    e.preventDefault()
+    if (newPassword.length < 8) { setResetError('Lösenordet måste vara minst 8 tecken'); return }
+    setResetLoading(true); setResetError(null)
+    try {
+      const { error } = await supabase.auth.updateUser({ password: newPassword })
+      if (error) throw error
+      setShowPasswordReset(false)
+      setNewPassword('')
+    } catch (err) {
+      setResetError(err.message || 'Något gick fel. Försök igen.')
+    } finally {
+      setResetLoading(false)
+    }
   }
 
   const filledCount = Object.values(tips).filter(Boolean).length
@@ -238,6 +275,62 @@ export default function WorldCupApp() {
         />
       )}
 
+      {showPasswordReset && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(6px)' }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl overflow-hidden"
+            style={{ background: '#1E293B', border: '1px solid #334155',
+                     boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+          >
+            <div className="px-6 pt-6 pb-4 text-center" style={{ borderBottom: '1px solid #334155' }}>
+              <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center text-2xl font-black mb-3"
+                   style={{ background: 'linear-gradient(135deg,#F59E0B,#D97706)' }}>🔑</div>
+              <h2 className="text-xl font-black" style={{ color: '#F1F5F9' }}>Nytt lösenord</h2>
+              <p className="text-xs mt-1" style={{ color: '#64748B' }}>
+                Ange ditt nya lösenord för att slutföra återställningen
+              </p>
+            </div>
+            <form onSubmit={handlePasswordReset} className="p-5 space-y-4">
+              <div>
+                <label className="text-xs font-semibold block mb-1" style={{ color: '#94A3B8' }}>
+                  Nytt lösenord
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={e => { setNewPassword(e.target.value); setResetError(null) }}
+                  placeholder="Minst 8 tecken"
+                  minLength={8}
+                  className="w-full px-4 py-2.5 rounded-xl text-sm outline-none transition-all"
+                  style={{ background: '#0F172A', border: '1.5px solid #334155', color: '#F1F5F9' }}
+                  autoFocus
+                />
+              </div>
+              {resetError && (
+                <p className="text-xs px-3 py-2 rounded-lg"
+                   style={{ background: 'rgba(239,68,68,0.1)', color: '#F87171' }}>
+                  ⚠️ {resetError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={resetLoading}
+                className="w-full py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+                style={{
+                  background: resetLoading ? '#334155' : 'linear-gradient(135deg,#F59E0B,#D97706)',
+                  color:      resetLoading ? '#64748B' : '#0F172A',
+                }}
+              >
+                {resetLoading ? '⏳ Sparar...' : 'Spara nytt lösenord'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ─── Header ────────────────────────────────────────────────────────── */}
       <div style={{ background: 'linear-gradient(180deg,#1E293B,#0F172A)', borderBottom: '1px solid #334155' }}>
         <div className="max-w-4xl mx-auto px-4 py-4">
@@ -247,9 +340,17 @@ export default function WorldCupApp() {
               <div className="w-11 h-11 rounded-2xl flex items-center justify-center text-xl font-black"
                    style={{ background: 'linear-gradient(135deg,#F59E0B,#D97706)' }}>⚽</div>
               <div>
-                <h1 className="font-black text-lg leading-tight" style={{ color: '#F1F5F9' }}>
-                  VM-tippning 2026
-                </h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="font-black text-lg leading-tight" style={{ color: '#F1F5F9' }}>
+                    VM-tippning 2026
+                  </h1>
+                  {syncing && (
+                    <span className="text-[11px] font-semibold uppercase rounded-full px-2 py-1"
+                          style={{ background: 'rgba(255,255,255,0.12)', color: '#F59E0B' }}>
+                      Synkar...
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs" style={{ color: '#64748B' }}>
                   FIFA World Cup · USA / Kanada / Mexiko · Svensk tid
                 </p>
@@ -418,6 +519,18 @@ export default function WorldCupApp() {
       {/* ─── Sidinnehåll ─────────────────────────────────────────────────── */}
       <div className="max-w-4xl mx-auto px-4 py-6">
 
+        {saveError && (
+          <div className="mb-4 rounded-2xl px-4 py-3 flex items-center justify-between gap-3"
+               style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+            <p className="text-sm" style={{ color: '#F87171' }}>⚠️ {saveError}</p>
+            <button
+              onClick={() => setSaveError(null)}
+              className="shrink-0 text-lg leading-none"
+              style={{ color: '#64748B' }}
+            >×</button>
+          </div>
+        )}
+
         {!user && (
           <div className="mb-5 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap"
                style={{ background: 'rgba(245,158,11,0.07)', border: '1px solid rgba(245,158,11,0.2)' }}>
@@ -443,6 +556,8 @@ export default function WorldCupApp() {
               onTip={handleTip}
               filledCount={filledCount}
               user={user}
+              vmWinner={vmWinner}
+              onVmWinnerChange={handleVmWinnerChange}
             />
           </ErrorBoundary>
         )}
@@ -456,9 +571,8 @@ export default function WorldCupApp() {
             />
           </ErrorBoundary>
         )}
-        {tab === 'players'      && <ErrorBoundary><SpelerPredictions user={user} /></ErrorBoundary>}
+        {tab === 'players'      && <ErrorBoundary><SpelerPredictions user={user} isAdmin={profile?.is_admin === true} /></ErrorBoundary>}
         {tab === 'leaderboard'  && <ErrorBoundary><Leaderboard groupTips={tips} bracketTips={bracketTips} user={user} /></ErrorBoundary>}
-        {tab === 'friends'      && <ErrorBoundary><FriendsRoom groupTips={tips} bracketTips={bracketTips} user={user} /></ErrorBoundary>}
         {tab === 'profile'      && <ErrorBoundary><Profile user={user} onBack={() => { setTab('groups'); window.history.pushState({}, '', '/') }} onSignOut={handleSignOut} profile={profile} rankInfo={rankInfo} tips={tips} bracketTips={bracketTips} userPredictions={userPredictions} /></ErrorBoundary>}
         {tab === 'admin'        && <ErrorBoundary><AdminPanel demo={DEMO_PREVIEW} user={user} profile={profile} /></ErrorBoundary>}
       </div>

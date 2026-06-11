@@ -71,15 +71,16 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
   }
 
   async function saveVmWinner() {
-    if (!vmWinnerInput.trim()) return setVmMessage('Ange ett lagnamn')
+    const normalizedWinner = vmWinnerInput.trim()
+    if (!normalizedWinner) return setVmMessage('Ange ett lagnamn')
     setLoading(true); setVmMessage(null)
     try {
       const { error } = await supabase
         .from('tournament_results')
-        .update({ winner: vmWinnerInput.trim(), updated_at: new Date().toISOString() })
+        .update({ winner: normalizedWinner, updated_at: new Date().toISOString() })
         .eq('id', 1)
       if (error) throw error
-      setVmMessage('✓ VM-vinnare sparad: ' + vmWinnerInput.trim())
+      setVmMessage('✓ VM-vinnare sparad: ' + normalizedWinner)
     } catch (e) {
       setVmMessage('Fel: ' + (e.message || e))
     } finally { setLoading(false) }

@@ -30,7 +30,6 @@ export async function signOut() {
   localStorage.removeItem('wc26-tips')
   localStorage.removeItem('wc26-bracket-tips')
   localStorage.removeItem('vmWinner')
-  localStorage.removeItem('wc26-room')
 }
 
 export async function resetPassword(email) {
@@ -67,13 +66,17 @@ export async function deleteGroupTip(userId, matchId) {
   if (error) throw error
 }
 
-// Spara ett grupptips (upsert)
+// Spara ett grupptips via server-side konfliktkontroll.
 export async function saveGroupTip(userId, matchId, tip) {
-  const { error } = await supabase
-    .from('group_tips')
-    .upsert({ user_id: userId, match_id: matchId, tip, updated_at: new Date().toISOString() },
-             { onConflict: 'user_id,match_id' })
+  const { data, error } = await supabase.rpc('safe_save_group_tip', {
+    p_user_id: userId,
+    p_match_id: matchId,
+    p_tip: tip,
+  })
   if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Uppdatering av grupptips avvisades eftersom en nyare ändring redan sparats.')
+  }
 }
 
 // Ladda bracket-picks
@@ -86,13 +89,17 @@ export async function loadBracketPicks(userId) {
   return Object.fromEntries(data.map(r => [r.slot_id, r.team_id]))
 }
 
-// Spara bracket-pick
+// Spara bracket-pick via server-side konfliktkontroll.
 export async function saveBracketPick(userId, slotId, teamId) {
-  const { error } = await supabase
-    .from('bracket_picks')
-    .upsert({ user_id: userId, slot_id: slotId, team_id: teamId, updated_at: new Date().toISOString() },
-             { onConflict: 'user_id,slot_id' })
+  const { data, error } = await supabase.rpc('safe_save_bracket_pick', {
+    p_user_id: userId,
+    p_slot_id: slotId,
+    p_team_id: teamId,
+  })
   if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Uppdatering av bracket-pick avvisades eftersom en nyare ändring redan sparats.')
+  }
 }
 
 // Ladda spelar-tipsningar
@@ -110,19 +117,19 @@ export async function loadPlayerPredictions(userId) {
   return { selections, confirmed }
 }
 
-// Spara spelar-tipsning
+// Spara spelar-tipsning via server-side konfliktkontroll.
 export async function savePlayerPrediction(userId, category, player, isConfirmed) {
-  const { error } = await supabase
-    .from('player_predictions')
-    .upsert({
-      user_id:       userId,
-      category,
-      player_name:   player.name,
-      player_nation: player.nation,
-      confirmed:     isConfirmed,
-      updated_at:    new Date().toISOString(),
-    }, { onConflict: 'user_id,category' })
+  const { data, error } = await supabase.rpc('safe_save_player_prediction', {
+    p_user_id: userId,
+    p_category: category,
+    p_player_name: player.name,
+    p_player_nation: player.nation,
+    p_confirmed: isConfirmed,
+  })
   if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Uppdatering av spelar-tipsning avvisades eftersom en nyare ändring redan sparats.')
+  }
 }
 
 // ─── Match Results Sync ───────────────────────────────────────────────────────
@@ -157,7 +164,7 @@ export async function syncMatchResultsFromAPI() {
       .from('match_results')
       .upsert(rows, { onConflict: 'match_id' })
     if (error) console.warn('Batch-upsert fel:', error.message)
-    else console.log(`✓ Synkade ${rows.length} matchresultat från API-Football`)
+    else if (import.meta.env.DEV) console.log(`✓ Synkade ${rows.length} matchresultat från API-Football`)
   } catch (e) {
     console.warn('syncMatchResultsFromAPI fel:', e.message)
   }
@@ -174,43 +181,20 @@ export async function syncPlayerStatsFromAPI() {
       const players = all[key] ?? []
       if (!players.length) continue
 
-      // Hämta befintliga rader för kategorin för att undvika dubletter
-      const { data: existing } = await supabase
+      const rows = players.map(r => ({
+        category:      cat,
+        player_name:   r.name,
+        player_nation: r.nation,
+        value:         r.value,
+        updated_at:    new Date().toISOString(),
+      }))
+
+      const { error } = await supabase
         .from('player_stats')
-        .select('id, player_name')
-        .eq('category', cat)
-
-      const existingByName = Object.fromEntries(
-        (existing ?? []).map(r => [r.player_name.toLowerCase(), r.id])
-      )
-
-      const toUpdate = []
-      const toInsert = []
-      for (const r of players) {
-        const row = {
-          category:      cat,
-          player_name:   r.name,
-          player_nation: r.nation,
-          value:         r.value,
-          updated_at:    new Date().toISOString(),
-        }
-        const existingId = existingByName[r.name.toLowerCase()]
-        if (existingId) toUpdate.push({ id: existingId, ...row })
-        else            toInsert.push(row)
-      }
-
-      if (toUpdate.length) {
-        const { error } = await supabase
-          .from('player_stats')
-          .upsert(toUpdate, { onConflict: 'id' })
-        if (error) console.warn(`player_stats upsert ${cat} fel:`, error.message)
-      }
-      if (toInsert.length) {
-        const { error } = await supabase.from('player_stats').insert(toInsert)
-        if (error) console.warn(`player_stats insert ${cat} fel:`, error.message)
-      }
+        .upsert(rows, { onConflict: 'category,player_name' })
+      if (error) console.warn(`player_stats upsert ${cat} fel:`, error.message)
     }
-    console.log('✓ Synkade spelarstatistik från API-Football')
+    if (import.meta.env.DEV) console.log('✓ Synkade spelarstatistik från API-Football')
   } catch (e) {
     console.warn('syncPlayerStatsFromAPI fel:', e.message)
   }
@@ -219,80 +203,61 @@ export async function syncPlayerStatsFromAPI() {
 // ─── VM-vinnartipp ────────────────────────────────────────────────────────────
 
 export async function saveVmWinnerPick(userId, teamName) {
-  const { error } = await supabase
-    .from('vm_picks')
-    .upsert({ user_id: userId, vm_winner: teamName, updated_at: new Date().toISOString() },
-             { onConflict: 'user_id' })
+  if (teamName === null) {
+    const { error } = await supabase
+      .from('vm_picks')
+      .delete()
+      .eq('user_id', userId)
+    if (error) throw error
+    return
+  }
+
+  const normalizedWinner = teamName.trim()
+  const { data, error } = await supabase.rpc('safe_save_vm_winner_pick', {
+    p_user_id: userId,
+    p_vm_winner: normalizedWinner,
+  })
   if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Uppdatering av VM-vinnartippningen avvisades eftersom en nyare ändring redan sparats.')
+  }
+}
+
+export async function loadVmWinnerPick(userId) {
+  const { data } = await supabase
+    .from('vm_picks')
+    .select('vm_winner')
+    .eq('user_id', userId)
+    .single()
+  return data?.vm_winner ?? null
 }
 
 // ─── Leaderboard ──────────────────────────────────────────────────────────────
 
 // Hämta global topplista (topp 50 profiler med poäng)
 export async function fetchLeaderboard() {
-  const { data, error } = await supabase
-    .from('leaderboard_full_view')  // inkluderar spelar- och VM-vinnartippningspoäng
-    .select('*')
-    .order('total_pts', { ascending: false })
-    .limit(50)
+  const { data, error } = await supabase.rpc('get_leaderboard')
   if (error) {
-    console.warn('Leaderboard view ej tillgänglig, faller tillbaka på mock-data:', error.message)
+    console.warn('Leaderboard RPC ej tillgänglig:', error.message)
     return null
   }
-  return data
+  return data?.slice(0, 50) ?? null
 }
 
-// ─── Vännerrum ────────────────────────────────────────────────────────────────
-
-// Skapa nytt rum
-export async function createRoom(userId) {
-  const code = Math.floor(100000 + Math.random() * 900000).toString()
+// Hämta spelarstatistik för livetabeller (används av icke-admin-användare)
+export async function fetchPlayerStats() {
   const { data, error } = await supabase
-    .from('friend_rooms')
-    .insert({ code, created_by: userId })
-    .select()
-    .single()
+    .from('player_stats')
+    .select('category, player_name, player_nation, value')
+    .order('value', { ascending: false })
   if (error) throw error
-
-  // Lägg till skaparen som medlem
-  await supabase.from('room_members').insert({ room_id: data.id, user_id: userId })
-  return data
-}
-
-// Gå med i rum via kod
-export async function joinRoom(userId, code) {
-  const { data: room, error: re } = await supabase
-    .from('friend_rooms')
-    .select('id')
-    .eq('code', code)
-    .single()
-  if (re) throw new Error('Rum hittades inte')
-
-  await supabase
-    .from('room_members')
-    .upsert({ room_id: room.id, user_id: userId }, { onConflict: 'room_id,user_id' })
-  return room
-}
-
-// Hämta rumsmedlemmar med deras tips-poäng
-export async function getRoomMembers(roomId) {
-  const { data, error } = await supabase
-    .from('room_members')
-    .select('user_id, profiles(username), joined_at')
-    .eq('room_id', roomId)
-  if (error) throw error
-  return data
-}
-
-// Hämta total_pts från leaderboard_view för en lista av user_ids
-export async function getRoomScores(userIds) {
-  if (!userIds?.length) return {}
-  const { data, error } = await supabase
-    .from('leaderboard_view')
-    .select('id, total_pts')
-    .in('id', userIds)
-  if (error) throw error
-  return Object.fromEntries(data.map(r => [r.id, r.total_pts ?? 0]))
+  const CAT_MAP = { scorer: 'scorers', assist: 'assists', yellow: 'yellow', red: 'red' }
+  const result = { scorers: [], assists: [], yellow: [], red: [] }
+  for (const r of data) {
+    const key = CAT_MAP[r.category]
+    if (key) result[key].push({ name: r.player_name, nation: r.player_nation, value: r.value })
+  }
+  return result
 }
 
 // ─── Profile helpers: get, avatar upload + profile update ────────────────

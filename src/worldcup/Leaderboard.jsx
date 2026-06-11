@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { MOCK_LEADERBOARD, TOTAL_MATCHES } from './data'
+import { TOTAL_MATCHES } from './data'
 import { fetchLeaderboard, supabase } from '../lib/supabase'
 
 function calcMyScore(groupTips, bracketTips) {
   return Object.values(groupTips).filter(Boolean).length * 3
-       + Object.values(bracketTips ?? {}).filter(Boolean).length * 3
+       + Object.values(bracketTips ?? {}).filter(Boolean).length * 2
 }
 
 const TIERS = [
@@ -18,47 +18,79 @@ const getTier = pts => TIERS.find(t => pts >= t.min) ?? TIERS[TIERS.length - 1]
 export default function Leaderboard({ groupTips, bracketTips, user }) {
   const [dbBoard, setDbBoard] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
 
   useEffect(() => {
     if (!user) return
 
-    setLoading(true)
-    fetchLeaderboard()
-      .then(data => setDbBoard(data))
-      .catch(() => setDbBoard(null))
-      .finally(() => setLoading(false))
+    const reloadLeaderboard = async () => {
+      setLoading(true)
+      try {
+        const data = await fetchLeaderboard()
+        if (!data) throw new Error('Leaderboard-data kunde inte hämtas')
+        setDbBoard(data)
+        setError(null)
+      } catch (err) {
+        setDbBoard([])
+        setError(`Leaderboard kunde inte laddas: ${err?.message ?? 'Okänt fel'}`)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    reloadLeaderboard()
 
     // Polling var 30:e sekund som fallback om realtid inte levererar
     const interval = setInterval(() => {
-      fetchLeaderboard()
-        .then(data => setDbBoard(data))
-        .catch(() => {})
+      reloadLeaderboard()
     }, 30_000)
 
-    // Realtidslyssnare: ny fetch direkt när match_results ändras
-    const channel = supabase
-      .channel('match_results_changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'match_results' },
-        () => {
-          fetchLeaderboard()
-            .then(data => setDbBoard(data))
-            .catch(() => {})
+    // Realtidslyssnare: ny fetch direkt när relevanta tabeller ändras
+    let channel = null
+    const subscribeChannel = () => {
+      const reload = async () => {
+        try {
+          const data = await fetchLeaderboard()
+          if (data) {
+            setDbBoard(data)
+            setError(null)
+          }
+        } catch (err) {
+          setError(`Leaderboard kunde inte laddas: ${err?.message ?? 'Okänt fel'}`)
         }
-      )
-      .subscribe()
+      }
+
+      channel = supabase
+        .channel('leaderboard_changes')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'match_results' }, reload)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'group_tips' }, reload)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bracket_picks' }, reload)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'player_predictions' }, reload)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'vm_picks' }, reload)
+        .subscribe(status => {
+          if (status === 'CHANNEL_ERROR' || status === 'ERROR') {
+            console.warn('Realtime leaderboard prenumeration fel:', status)
+          }
+          if (status === 'CLOSED' || status === 'TIMED_OUT') {
+            console.warn('Realtime leaderboard koppling stängd, försöker igen...')
+            setTimeout(() => {
+              if (channel?.state !== 'SUBSCRIBED') subscribeChannel()
+            }, 5000)
+          }
+        })
+    }
+
+    subscribeChannel()
 
     return () => {
       clearInterval(interval)
-      supabase.removeChannel(channel)
+      if (channel) supabase.removeChannel(channel)
     }
   }, [user])
 
   const myScore = calcMyScore(groupTips, bracketTips)
 
-  // Bygg leaderboard: Supabase-data om tillgänglig, annars mock + "Du"
-  const combined = (dbBoard ?? MOCK_LEADERBOARD)
+  const combined = (dbBoard ?? [])
     .map(u => ({
       id:       u.id,
       name:     u.username ?? u.name,
@@ -66,7 +98,6 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
       pts:      u.total_pts ?? u.pts,
       isMe:     user ? u.id === user.id : false,
     }))
-    .concat(!dbBoard ? [{ id: 0, name: 'Du', country: '🇸🇪', pts: myScore, isMe: true }] : [])
     .sort((a, b) => b.pts - a.pts)
     .map((u, i) => ({
       ...u,
@@ -125,7 +156,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
           <div className="flex items-center gap-2">
             <span>🌍</span>
             <span className="font-bold text-sm" style={{ color: '#F1F5F9' }}>
-              {dbBoard ? 'Live-ranking' : 'Världsranking (demo)'}
+              {error ? 'Leaderboard-fel' : dbBoard ? 'Live-ranking' : 'Laddar...'}
             </span>
           </div>
           {loading && <span className="text-xs" style={{ color: '#64748B' }}>Laddar...</span>}
@@ -136,6 +167,12 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
             </span>
           )}
         </div>
+
+        {error && (
+          <div className="px-4 py-4 text-sm text-red-200" style={{ background:'#441414', border:'1px solid #991B1B' }}>
+            {error}
+          </div>
+        )}
 
         <div className="divide-y" style={{ borderColor: '#334155' }}>
           {combined.length === 0 && (
@@ -206,6 +243,10 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
           {[
             ['Rätt 1X2-tips (grupp + slutspel)', '3p',  '#34D399'],
             ['Rätt VM-vinnare (bonus)',           '20p', '#F59E0B'],
+            ['Skyttekung',                        '10p', '#F59E0B'],
+            ['Assistkung',                        '12p', '#3B82F6'],
+            ['Flest gula kort',                   '8p',  '#EAB308'],
+            ['Flest röda kort',                   '10p', '#EF4444'],
           ].map(([lbl, pts, c]) => (
             <div key={lbl} className="flex items-center justify-between">
               <span className="text-xs" style={{ color: '#94A3B8' }}>{lbl}</span>

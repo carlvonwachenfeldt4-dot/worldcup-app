@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Flag from './Flag'
 import { isTournamentStarted } from '../lib/scoreCalculator'
 import { getTopPlayersAll } from '../lib/apiFootball'
+import { savePlayerPrediction, loadPlayerPredictions, fetchPlayerStats } from '../lib/supabase'
 
 // ─── Nation → iso2-mappning (används av Flag-komponenten med flag-icons SVG:er)
 // Löser problemet med att Unicode-flaggemojis visas som textkoder på Windows.
@@ -182,7 +183,7 @@ function PlayerCard({ player, selected, color, onSelect }) {
   return (
     <button
       onClick={onSelect}
-      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all active:scale-98"
+      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all active:scale-95"
       style={{
         background: selected ? `${color}18` : 'transparent',
         border:     `1.5px solid ${selected ? color : '#2D3748'}`,
@@ -517,6 +518,39 @@ function useLiveStats(enabled) {
   return { stats, lastUpdated, loading, refetch: fetchAll }
 }
 
+// ─── Hook: hämta livetabeller från Supabase (för icke-admin-användare) ───────
+
+function useSupabaseStats(enabled) {
+  const [stats,       setStats]       = useState(null)
+  const [lastUpdated, setLastUpdated] = useState(null)
+  const [loading,     setLoading]     = useState(false)
+  const mounted = useRef(false)
+
+  const fetchAll = useCallback(async () => {
+    if (!enabled) return
+    setLoading(true)
+    try {
+      const data = await fetchPlayerStats()
+      if (!mounted.current) return
+      setStats(data)
+      setLastUpdated(new Date())
+    } catch (e) {
+      console.warn('Supabase-stats: kunde inte hämta data', e.message)
+    } finally {
+      if (mounted.current) setLoading(false)
+    }
+  }, [enabled])
+
+  useEffect(() => {
+    if (!enabled) return
+    mounted.current = true
+    fetchAll()
+    return () => { mounted.current = false }
+  }, [enabled, fetchAll])
+
+  return { stats, lastUpdated, loading, refetch: fetchAll }
+}
+
 // ─── Livetabell – en statistikkategori ───────────────────────────────────────
 
 function LiveTable({ title, emoji, color, statLabel, rows, userPickName, lastUpdated, loading }) {
@@ -660,11 +694,12 @@ function PointsBanner() {
 
 // ─── Huvudkomponent: SpelerPredictions ───────────────────────────────────────
 
-export default function SpelerPredictions() {
+export default function SpelerPredictions({ user, isAdmin }) {
   const [selections, setSelections] = useState({ scorer:null, assist:null, yellow:null, red:null })
   const [confirmed,  setConfirmed]  = useState({ scorer:false, assist:false, yellow:false, red:false })
   const [queries,    setQueries]    = useState({ scorer:'', assist:'', yellow:'', red:'' })
   const [open,       setOpen]       = useState({ scorer:true, assist:true, yellow:true, red:true })
+  const [saveError,  setSaveError]  = useState(null)
 
   // Dev-läge: ?dev=true i URL → visa livetabeller oavsett datum (för granskning)
   const isDevMode = new URLSearchParams(window.location.search).get('dev') === 'true'
@@ -678,7 +713,7 @@ export default function SpelerPredictions() {
         setIsLocked(true)
         clearInterval(id)
       }
-    }, 60_000)
+    }, 10_000)
     return () => clearInterval(id)
   }, [isLocked])
 
@@ -692,6 +727,22 @@ export default function SpelerPredictions() {
       }
     } catch { /* ignorera */ }
   }, [])
+
+  // ─ Ladda från Supabase vid inloggning – skriver över localStorage ─
+  useEffect(() => {
+    if (!user?.id) return
+    const catPlayers = { scorer: goalScorers, assist: assistProviders, yellow: yellowCardRisk, red: redCardRisk }
+    loadPlayerPredictions(user.id)
+      .then(({ selections: dbSels, confirmed: dbConf }) => {
+        const resolved = {}
+        for (const [cat, dbSel] of Object.entries(dbSels)) {
+          resolved[cat] = dbSel ? (catPlayers[cat]?.find(p => p.name === dbSel.name) ?? null) : null
+        }
+        setSelections(prev => ({ ...prev, ...resolved }))
+        setConfirmed(prev => ({ ...prev, ...dbConf }))
+      })
+      .catch(console.warn)
+  }, [user?.id])
 
   // ─ Spara till localStorage vid förändring ─
   useEffect(() => {
@@ -708,6 +759,8 @@ export default function SpelerPredictions() {
   function handleConfirm(catKey) {
     if (!selections[catKey]) return
     setConfirmed(prev => ({ ...prev, [catKey]: true }))
+    if (user) savePlayerPrediction(user.id, catKey, selections[catKey], true)
+      .catch(() => setSaveError('Tipsningen kunde inte sparas – kontrollera uppkopplingen och försök igen.'))
   }
 
   function handleEdit(catKey) {
@@ -726,7 +779,10 @@ export default function SpelerPredictions() {
   // ─ Livetabeller ─
   const showLiveTables = isDevMode || isLocked
   const showSelection  = !isLocked || isDevMode
-  const { stats, lastUpdated, loading, refetch } = useLiveStats(showLiveTables)
+  // Admin: poll direkt mot API-Football. Vanliga användare: läs från Supabase (uppdateras av admin-synken).
+  const apiLive = useLiveStats(showLiveTables && isAdmin)
+  const dbLive  = useSupabaseStats(showLiveTables && !isAdmin)
+  const { stats, lastUpdated, loading, refetch } = isAdmin ? apiLive : dbLive
 
   // Konfiguration för de fyra livetabellerna
   const LIVE_TABLES = [
@@ -738,6 +794,14 @@ export default function SpelerPredictions() {
 
   return (
     <div className="space-y-5">
+
+      {saveError && (
+        <div className="rounded-2xl px-4 py-3 flex items-center justify-between gap-3"
+             style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)' }}>
+          <p className="text-sm" style={{ color: '#F87171' }}>⚠️ {saveError}</p>
+          <button onClick={() => setSaveError(null)} className="shrink-0 text-lg leading-none" style={{ color: '#64748B' }}>×</button>
+        </div>
+      )}
 
       {/* Sidtitel */}
       <div className="flex items-start justify-between gap-3">

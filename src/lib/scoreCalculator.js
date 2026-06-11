@@ -2,10 +2,15 @@
 export const TOURNAMENT_START = new Date("2026-06-11T21:00:00+02:00")
 
 // Alla VM-matcher spelas under CEST (juni–juli 2026).
-// Tolkar dt-strängar av formatet "2026-06-11T21:00" som CEST.
+// Om dt-strängen redan innehåller tidszon används den direkt.
 export function parseMatchTime(dt) {
-  // "2026-06-11T21:00" + ":00+02:00" → giltig ISO 8601 med tidszon
-  return new Date(dt + ':00+02:00')
+  if (!dt) return new Date('')
+  const s = String(dt).trim()
+  if (/[+-]\d{2}:\d{2}$|Z$/i.test(s)) {
+    return new Date(s)
+  }
+  // Tolkar ofullständig lokal tid som CEST
+  return new Date(s + ':00+02:00')
 }
 
 // ─── Låsningskontroll ─────────────────────────────────────────────────────────
