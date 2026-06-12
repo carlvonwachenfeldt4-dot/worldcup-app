@@ -779,6 +779,15 @@ export default function SpelerPredictions({ user, isAdmin }) {
   // ─ Livetabeller ─
   const showLiveTables = isDevMode || isLocked
   const showSelection  = !isLocked || isDevMode
+  
+  // DEBUG: Log lock state and selection visibility
+  console.log('[SpelerPredictions DEBUG]', {
+    isLocked,
+    showSelection,
+    showLiveTables,
+    isDevMode,
+  })
+  
   // Admin: poll direkt mot API-Football. Vanliga användare: läs från Supabase (uppdateras av admin-synken).
   const apiLive = useLiveStats(showLiveTables && isAdmin)
   const dbLive  = useSupabaseStats(showLiveTables && !isAdmin)
