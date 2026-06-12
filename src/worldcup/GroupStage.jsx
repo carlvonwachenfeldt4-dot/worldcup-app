@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { TEAMS, GROUPS, MATCHES_BY_GROUP, TOTAL_MATCHES, calcStandings, formatDt } from './data'
 import Flag from './Flag'
-import { getCountdown, isMatchSoon, parseMatchTime, TOURNAMENT_START } from '../lib/scoreCalculator'
+import { getCountdown, isMatchSoon, parseMatchTime, TOURNAMENT_START, isVmWinnerLocked } from '../lib/scoreCalculator'
 import { fetchTeamLogos } from '../lib/apiFootball'
 import { saveVmWinnerPick } from '../lib/supabase'
 
@@ -338,12 +338,12 @@ function TeamCard({ team, logoUrl, selected, locked, onSelect }) {
 function VMWinnerSection({ vmWinner, onSelect, logos }) {
   const [query, setQuery] = useState('')
 
-  // Låsning: exakt när första matchen startar (återanvänder TOURNAMENT_START)
-  const [locked, setLocked] = useState(() => new Date() >= TOURNAMENT_START)
+  // Låsning: separat deadline för VM-vinnare/tippningar
+  const [locked, setLocked] = useState(() => isVmWinnerLocked())
   useEffect(() => {
     if (locked) return
     const id = setInterval(() => {
-      if (new Date() >= TOURNAMENT_START) { setLocked(true); clearInterval(id) }
+      if (isVmWinnerLocked()) { setLocked(true); clearInterval(id) }
     }, 60_000)
     return () => clearInterval(id)
   }, [locked])
@@ -378,9 +378,9 @@ function VMWinnerSection({ vmWinner, onSelect, logos }) {
           <span className="text-xl shrink-0">🔒</span>
           <div>
             <p className="font-bold text-sm" style={{ color:'#F87171' }}>
-              Tippningen stängde vid första avsparken
+              Tippningen är stängd – deadline 12 juni 23:59 har passerat
             </p>
-            <p className="text-xs mt-0.5" style={{ color:'#64748B' }}>11 jun 21:00</p>
+            <p className="text-xs mt-0.5" style={{ color:'#64748B' }}>12 jun 23:59</p>
           </div>
         </div>
       )}

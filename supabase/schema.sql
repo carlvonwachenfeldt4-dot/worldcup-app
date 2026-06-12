@@ -211,6 +211,7 @@ ALTER TABLE public.player_predictions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Profiler synliga för alla"   ON public.profiles;
 DROP POLICY IF EXISTS "Skapa egen profil"           ON public.profiles;
 DROP POLICY IF EXISTS "Uppdatera egen profil"       ON public.profiles;
+DROP POLICY IF EXISTS "Radera egen profil"          ON public.profiles;
 
 CREATE POLICY "Profiler synliga för alla"   ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Skapa egen profil"           ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id);
@@ -274,7 +275,7 @@ BEGIN
   END IF;
 
   -- Övriga typer av tips stängs vid deadline för spelarprediktion och VM-vinnare.
-  IF NOW() >= TIMESTAMPTZ '2026-06-12T20:00:00Z' THEN
+  IF NOW() >= TIMESTAMPTZ '2026-06-12T21:59:00Z' THEN
     RAISE EXCEPTION 'Tippningen är stängd – deadline nådd';
   END IF;
   RETURN NEW;
@@ -342,6 +343,9 @@ CREATE TABLE IF NOT EXISTS public.match_results (
 );
 
 ALTER TABLE public.match_results ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Matchresults select" ON public.match_results;
+DROP POLICY IF EXISTS "Matchresults admin write" ON public.match_results;
+DROP POLICY IF EXISTS "Matchresults admin update" ON public.match_results;
 CREATE POLICY "Matchresults select" ON public.match_results FOR SELECT USING (true);
 CREATE POLICY "Matchresults admin write" ON public.match_results FOR INSERT WITH CHECK (
   (SELECT coalesce(is_admin, false) FROM public.profiles WHERE id = auth.uid()) = true
@@ -357,6 +361,7 @@ CREATE TABLE IF NOT EXISTS public.group_match_schedule (
 );
 
 ALTER TABLE public.group_match_schedule ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Match schedule select" ON public.group_match_schedule;
 CREATE POLICY "Match schedule select" ON public.group_match_schedule FOR SELECT USING (true);
 
 INSERT INTO public.group_match_schedule (match_id, starts_at) VALUES
@@ -445,10 +450,26 @@ CREATE TABLE IF NOT EXISTS public.player_stats (
   updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
-ALTER TABLE public.player_stats
-  ADD CONSTRAINT IF NOT EXISTS player_stats_category_name_unique UNIQUE (category, player_name);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class t ON c.conrelid = t.oid
+    JOIN pg_namespace n ON t.relnamespace = n.oid
+    WHERE c.conname = 'player_stats_category_name_unique'
+      AND n.nspname = 'public'
+  ) THEN
+    ALTER TABLE public.player_stats
+      ADD CONSTRAINT player_stats_category_name_unique UNIQUE (category, player_name);
+  END IF;
+END
+$$;
 
 ALTER TABLE public.player_stats ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Playerstats select" ON public.player_stats;
+DROP POLICY IF EXISTS "Playerstats admin write" ON public.player_stats;
+DROP POLICY IF EXISTS "Playerstats admin update" ON public.player_stats;
 CREATE POLICY "Playerstats select" ON public.player_stats FOR SELECT USING (true);
 CREATE POLICY "Playerstats admin write" ON public.player_stats FOR INSERT WITH CHECK (
   (SELECT coalesce(is_admin, false) FROM public.profiles WHERE id = auth.uid()) = true
@@ -466,6 +487,10 @@ CREATE TABLE IF NOT EXISTS public.vm_picks (
 );
 
 ALTER TABLE public.vm_picks ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Vinnarpicks select" ON public.vm_picks;
+DROP POLICY IF EXISTS "Vinnarpicks own upsert" ON public.vm_picks;
+DROP POLICY IF EXISTS "Vinnarpicks own update" ON public.vm_picks;
+DROP POLICY IF EXISTS "Vinnarpicks own delete" ON public.vm_picks;
 CREATE POLICY "Vinnarpicks select" ON public.vm_picks FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Vinnarpicks own upsert" ON public.vm_picks FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Vinnarpicks own update" ON public.vm_picks FOR UPDATE USING (auth.uid() = user_id);
@@ -474,11 +499,13 @@ CREATE POLICY "Vinnarpicks own delete" ON public.vm_picks FOR DELETE USING (auth
 -- Spara turneringens officiella vinnare (endast admin/server skriver)
 CREATE TABLE IF NOT EXISTS public.tournament_results (
   id    INT PRIMARY KEY DEFAULT 1,
-  winner TEXT,
+  winner TEXT DEFAULT '',
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
-INSERT INTO public.tournament_results (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+INSERT INTO public.tournament_results (id, winner) VALUES (1, '') ON CONFLICT (id) DO NOTHING;
 ALTER TABLE public.tournament_results ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Tournament select" ON public.tournament_results;
+DROP POLICY IF EXISTS "Tournament admin upsert" ON public.tournament_results;
 CREATE POLICY "Tournament select" ON public.tournament_results FOR SELECT USING (true);
 CREATE POLICY "Tournament admin upsert" ON public.tournament_results FOR UPDATE USING (
   (SELECT coalesce(is_admin, false) FROM public.profiles WHERE id = auth.uid()) = true

@@ -15,8 +15,18 @@ export function parseMatchTime(dt) {
 
 // ─── Låsningskontroll ─────────────────────────────────────────────────────────
 
+export const PLAYER_PREDICTIONS_DEADLINE = new Date("2026-06-12T23:59:00+02:00")
+
 export function isTournamentStarted() {
   return new Date() >= TOURNAMENT_START
+}
+
+export function isPlayerPredictionLocked() {
+  return new Date() >= PLAYER_PREDICTIONS_DEADLINE
+}
+
+export function isVmWinnerLocked() {
+  return new Date() >= PLAYER_PREDICTIONS_DEADLINE
 }
 
 export function isMatchLocked(dt) {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Flag from './Flag'
-import { isTournamentStarted } from '../lib/scoreCalculator'
+import { isPlayerPredictionLocked } from '../lib/scoreCalculator'
 import { getTopPlayersAll } from '../lib/apiFootball'
 import { savePlayerPrediction, loadPlayerPredictions, fetchPlayerStats } from '../lib/supabase'
 
@@ -704,12 +704,12 @@ export default function SpelerPredictions({ user, isAdmin }) {
   // Dev-läge: ?dev=true i URL → visa livetabeller oavsett datum (för granskning)
   const isDevMode = new URLSearchParams(window.location.search).get('dev') === 'true'
 
-  // ─ Turneringslåsning: kontrollera vid mount och var 60:e sekund ─
-  const [isLocked, setIsLocked] = useState(() => isTournamentStarted())
+  // ─ Spelarvalslåsning: kontrollera vid mount och var 10:e sekund ─
+  const [isLocked, setIsLocked] = useState(() => isPlayerPredictionLocked())
   useEffect(() => {
     if (isLocked) return  // redan låst, inget mer att göra
     const id = setInterval(() => {
-      if (isTournamentStarted()) {
+      if (isPlayerPredictionLocked()) {
         setIsLocked(true)
         clearInterval(id)
       }
@@ -861,7 +861,7 @@ export default function SpelerPredictions({ user, isAdmin }) {
           <span className="text-xl shrink-0">🔒</span>
           <div>
             <p className="font-bold text-sm" style={{ color:'#F87171' }}>
-              Tippningen är stängd – turneringen har börjat
+              Tippningen är stängd – deadline 12 juni 23:59 har passerat
             </p>
             <p className="text-xs mt-0.5" style={{ color:'#64748B' }}>
               Dina val är låsta och räknas mot de faktiska resultaten
