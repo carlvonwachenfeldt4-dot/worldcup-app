@@ -187,12 +187,16 @@ export default function WorldCupApp() {
   async function syncFromSupabase(userId) {
     setSyncing(true)
     try {
-      const [dbTips, dbBracket] = await Promise.all([
+      const [dbTips, dbBracket, dbPredictions, dbVmWinner] = await Promise.all([
         loadGroupTips(userId),
         loadBracketPicks(userId),
+        loadPlayerPredictions(userId),
+        loadVmWinnerPick(userId),
       ])
       setTips(dbTips ?? {})
       setBracketTips(dbBracket ?? {})
+      setUserPredictions(dbPredictions ?? { selections: {}, confirmed: {} })
+      setVmWinner(dbVmWinner ?? null)
     } catch (err) {
       console.warn('Kunde inte ladda från Supabase:', err.message)
     } finally {

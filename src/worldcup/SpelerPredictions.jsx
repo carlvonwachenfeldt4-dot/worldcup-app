@@ -138,7 +138,7 @@ const yellowCardRisk = [
   { id:21, name:'Rodrigo De Paul',       nation:'Argentina',     flag:'🇦🇷', club:'Atlético Madrid'   },
   { id:22, name:'Mateus Uribe',          nation:'Colombia',      flag:'🇨🇴', club:'Porto'             },
   { id:23, name:'Wataru Endō',           nation:'Japan',         flag:'🇯🇵', club:'Liverpool'         },
-  { id:24, name:'Jesper Gudmundsson',    nation:'Sverige',       flag:'🇸🇪', club:'Burnley'           },
+  { id:24, name:'Gabriel Gudmundsson',   nation:'Sverige',       flag:'🇸🇪', club:'Rosenborg'         },
   { id:25, name:'Isak Hien',             nation:'Sverige',       flag:'🇸🇪', club:'Atalanta'          },
   { id:26, name:'Héctor Herrera',        nation:'Mexiko',        flag:'🇲🇽', club:'Houston Dynamo'    },
   { id:27, name:'Konrad Laimer',         nation:'Österrike',     flag:'🇦🇹', club:'Bayern München'    },
@@ -160,8 +160,8 @@ const redCardRisk = [
   { id:13, name:'Morteza Pouraliganji', nation:'Iran',       flag:'🇮🇷', club:'Al-Gharafa'        },
   { id:14, name:'Kalidou Koulibaly',     nation:'Senegal',   flag:'🇸🇳', club:'Al-Hilal'          },
   { id:15, name:'Sergiño Dest',          nation:'USA',       flag:'🇺🇸', club:'PSV'               },
-  { id:16, name:'Jesper Gudmundsson',    nation:'Sverige',   flag:'🇸🇪', club:'Burnley'           },
-  { id:17, name:'Patrik Hien',           nation:'Sverige',   flag:'🇸🇪', club:'Girona'            },
+  { id:16, name:'Gabriel Gudmundsson',   nation:'Sverige',   flag:'🇸🇪', club:'Rosenborg'         },
+  { id:17, name:'Isak Hien',             nation:'Sverige',   flag:'🇸🇪', club:'Atalanta'          },
 ]
 
 // ─── Kategori-konfiguration ───────────────────────────────────────────────────

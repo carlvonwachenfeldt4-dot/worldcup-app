@@ -273,9 +273,9 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- Övriga typer av tips stängs vid turneringsstart.
-  IF NOW() >= TIMESTAMPTZ '2026-06-11T19:00:00Z' THEN
-    RAISE EXCEPTION 'Tippningen är stängd – turneringen har startat';
+  -- Övriga typer av tips stängs vid deadline för spelarprediktion och VM-vinnare.
+  IF NOW() >= TIMESTAMPTZ '2026-06-12T20:00:00Z' THEN
+    RAISE EXCEPTION 'Tippningen är stängd – deadline nådd';
   END IF;
   RETURN NEW;
 END;
