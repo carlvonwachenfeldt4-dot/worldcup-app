@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js'
-import { APP_MATCHES_FLAT } from '../src/worldcup/data.js'
+import { APP_MATCHES_FLAT, TEAMS } from '../src/worldcup/data.js'
 
 const SUPABASE_URL = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL
 const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -130,8 +130,9 @@ function resolveRoundId(rawRound) {
 function matchApiToAppId(apiFixtures, appMatches) {
   const result = {}
   for (const appMatch of appMatches) {
-    const appHomeName = normalizeId(appMatch.home)
-    const appAwayName = normalizeId(appMatch.away)
+    // Använd svenska lagnamnet från TEAMS för bästa matchning mot API_TO_SWEDISH-konverterat API-namn
+    const appHomeName = normalizeId(TEAMS[appMatch.home]?.name ?? appMatch.home)
+    const appAwayName = normalizeId(TEAMS[appMatch.away]?.name ?? appMatch.away)
     const appHomeCode = normalizeId(appMatch.home)
     const appAwayCode = normalizeId(appMatch.away)
 
@@ -213,9 +214,18 @@ async function syncMatchResults() {
   if (!Array.isArray(fixtures)) {
     throw new Error('getFixtures() returnerade inte en array.')
   }
+  console.log(`API-Football returnerade ${fixtures.length} fixtures för league=${VM_2026_LEAGUE_ID}, season=${VM_2026_SEASON}`)
 
   const FINISHED = new Set(['FT', 'AET', 'PEN'])
   const mapping = matchApiToAppId(fixtures, APP_MATCHES_FLAT)
+  const matchedCount = Object.keys(mapping).length
+  const unmatchedApp = APP_MATCHES_FLAT.filter(m => !mapping[m.id]).map(m => m.id)
+
+  console.log(`Matchade ${matchedCount} av ${APP_MATCHES_FLAT.length} app-matcher mot API-fixtures`)
+  if (unmatchedApp.length > 0) {
+    console.warn('Ej matchade app-matcher (kolla lagnamn/koder):', unmatchedApp.join(', '))
+  }
+
   const rows = Object.entries(mapping)
     .filter(([, f]) => FINISHED.has(f.fixture?.status?.short ?? 'NS'))
     .map(([appMatchId, f]) => ({
@@ -228,16 +238,18 @@ async function syncMatchResults() {
     }))
 
   if (rows.length === 0) {
-    console.log('Ingen färdigmatchad fixture att uppdatera.')
+    console.log('Inga färdiga (FT/AET/PEN) matcher att uppdatera.')
     return
   }
+
+  console.log(`Upsert ${rows.length} rader:`, rows.map(r => `${r.match_id}(${r.home_goals}-${r.away_goals})`).join(', '))
 
   const { error } = await supabase
     .from('match_results')
     .upsert(rows, { onConflict: 'match_id' })
 
   if (error) throw error
-  console.log(`Synkade ${rows.length} matchresultat till Supabase.`)
+  console.log(`✓ Synkade ${rows.length} matchresultat till Supabase.`)
 }
 
 async function syncPlayerStats() {

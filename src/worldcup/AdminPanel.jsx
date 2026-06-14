@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase, syncMatchResultsFromAPI, syncPlayerStatsFromAPI } from '../lib/supabase'
+import { supabase, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, fetchMatchResults } from '../lib/supabase'
 
 export default function AdminPanel({ demo = false, user = null, profile = null }) {
   const [matchId, setMatchId] = useState('')
@@ -12,6 +12,8 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
   const [vmMessage, setVmMessage] = useState(null)
   const [syncMessage, setSyncMessage] = useState(null)
   const [syncing, setSyncing] = useState(false)
+  const [matchResults, setMatchResults] = useState(null)
+  const [diagLoading, setDiagLoading] = useState(false)
 
   async function fetchResult() {
     if (!matchId) return setMessage('Ange match_id')
@@ -66,6 +68,7 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
           .upsert(payload, { onConflict: 'match_id' })
         if (error) throw error
         setMessage('Sparat resultat för ' + matchId)
+        await reloadDiag()
       }
     } catch (e) {
       setMessage('Fel vid sparande: ' + (e.message || e))
@@ -88,12 +91,40 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
     } finally { setLoading(false) }
   }
 
+  async function reloadDiag() {
+    try {
+      const rows = await fetchMatchResults()
+      setMatchResults(rows)
+    } catch (e) {
+      console.warn('fetchMatchResults fel:', e.message)
+    }
+  }
+
+  async function loadDiagnostics() {
+    setDiagLoading(true)
+    try {
+      await reloadDiag()
+    } finally { setDiagLoading(false) }
+  }
+
   async function runApiSync() {
     setSyncing(true); setSyncMessage(null)
     try {
-      await syncMatchResultsFromAPI()
+      const result = await syncMatchResultsFromAPI()
       await syncPlayerStatsFromAPI()
-      setSyncMessage('✓ Synk klar – matchresultat och spelarstatistik uppdaterade')
+
+      if (result.error) {
+        setSyncMessage(`Synk-fel: ${result.error}`)
+      } else if (result.synced === 0 && result.total === 0) {
+        setSyncMessage(`API returnerade 0 fixtures. Kontrollera att VITE_API_FOOTBALL_KEY är satt och att league=1/season=2026 finns i API-Football.`)
+      } else {
+        setSyncMessage(
+          `✓ Synk klar – ${result.synced} matcher sparade till match_results` +
+          ` (${result.matched} matchade av ${result.total} API-fixtures)` +
+          (result.matchIds.length ? `. IDs: ${result.matchIds.join(', ')}` : '')
+        )
+      }
+      await reloadDiag()
     } catch (e) {
       setSyncMessage('Synk-fel: ' + (e.message || e))
     } finally { setSyncing(false) }
@@ -121,103 +152,183 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
         count++
       }
       setMessage(`Pushed ${count} resultat till Supabase`)
+      await reloadDiag()
     } catch (e) {
       setMessage('Push fel: ' + (e.message || e))
     } finally { setLoading(false) }
   }
 
+  const withResult    = (matchResults ?? []).filter(r => r.result != null)
+  const withoutResult = (matchResults ?? []).filter(r => r.result == null)
+
   return (
-    <div className="p-4 rounded-2xl" style={{ background:'#071025', border:'1px solid #223251' }}>
-      <h2 className="font-bold text-lg" style={{ color:'#F1F5F9' }}>Admin — Testa matchresultat</h2>
-      <p className="text-xs" style={{ color:'#94A3B8' }}>Skriv in `match_id` (t.ex. "F3") för att simulera ett resultat.</p>
+    <div className="p-4 rounded-2xl space-y-5" style={{ background:'#071025', border:'1px solid #223251' }}>
+      <h2 className="font-bold text-lg" style={{ color:'#F1F5F9' }}>Admin — Matchresultat</h2>
 
-      <div className="mt-3 space-y-2">
-        <div className="flex gap-2">
-          <input value={matchId} onChange={e => setMatchId(e.target.value)} placeholder="match_id (t.ex. F3)"
-                 className="flex-1 rounded px-3 py-2" />
-          <button onClick={fetchResult} className="px-3 py-2 rounded" disabled={loading}
-                  style={{ background:'#334155', color:'#F1F5F9' }}>Hämta</button>
-        </div>
-
-        <div className="flex gap-2">
-          <input value={homeGoals} onChange={e => setHomeGoals(e.target.value)} placeholder="home goals"
-                 className="w-24 rounded px-3 py-2" />
-          <input value={awayGoals} onChange={e => setAwayGoals(e.target.value)} placeholder="away goals"
-                 className="w-24 rounded px-3 py-2" />
-          <select value={status} onChange={e => setStatus(e.target.value)} className="rounded px-3 py-2">
-            <option>NS</option>
-            <option>1H</option>
-            <option>HT</option>
-            <option>2H</option>
-            <option>FT</option>
-          </select>
-        </div>
-
-        <div className="flex gap-2">
-          <button onClick={saveResult} className="px-4 py-2 rounded font-semibold" style={{ background:'#F59E0B', color:'#0F172A' }} disabled={loading}>Spara</button>
-          <button onClick={() => { setMatchId(''); setHomeGoals(''); setAwayGoals(''); setStatus('FT'); setMessage(null) }} className="px-3 py-2 rounded" style={{ background:'#334155', color:'#F1F5F9' }}>Rensa</button>
-        </div>
-
-        {demo && (
-          <div className="mt-3">
-            <p className="text-xs" style={{ color:'#94A3B8' }}>Demo-läge: spara lokala resultat i `localStorage`.</p>
-            <div className="flex flex-col gap-2 mt-2">
-              <button onClick={() => { localStorage.removeItem('demo.match_results'); setMessage('Rensade lokala demo-resultat'); }} className="px-3 py-2 rounded" style={{ background:'#334155', color:'#F1F5F9' }}>Rensa lokalt</button>
-              <button onClick={pushDemoToSupabase} className="px-4 py-2 rounded font-semibold" style={{ background:'#06B6D4', color:'#042027' }} disabled={loading || !user || !profile?.is_admin}>Push lokala → Supabase</button>
-              {!user && (
-                <p className="text-xs text-[#94A3B8]">Du behöver inte logga in för att använda demo-läget. Push till Supabase kräver dock verklig admin-inloggning.</p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {message && <div className="text-xs mt-2" style={{ color:'#CBD5E1' }}>{message}</div>}
-
-        {/* ─ Synk från API-Football ─ */}
-        {!demo && (
-          <div className="mt-4 pt-4" style={{ borderTop: '1px solid #223251' }}>
-            <p className="text-xs font-semibold mb-2" style={{ color: '#94A3B8' }}>API-Football synk – hämtar alla färdiga matcher (FT/AET/PEN)</p>
+      {/* ─ Diagnostik ─ */}
+      {!demo && (
+        <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold" style={{ color:'#64748B' }}>DIAGNOSTIK — match_results-tabellen</p>
             <button
-              onClick={runApiSync}
-              disabled={syncing}
-              className="px-4 py-2 rounded font-semibold"
-              style={{ background: '#22C55E', color: '#052e16' }}
+              onClick={loadDiagnostics}
+              disabled={diagLoading}
+              className="text-xs px-2 py-1 rounded"
+              style={{ background:'#1E3A5F', color:'#93C5FD' }}
             >
-              {syncing ? 'Synkar...' : '⚡ Synka matchresultat nu'}
+              {diagLoading ? 'Läser...' : '🔍 Läs tabell'}
             </button>
-            {syncMessage && (
-              <div className="text-xs mt-2" style={{ color: syncMessage.startsWith('✓') ? '#34D399' : '#F87171' }}>
-                {syncMessage}
+          </div>
+
+          {matchResults === null && (
+            <p className="text-xs" style={{ color:'#475569' }}>Klicka "Läs tabell" för att se vad som finns i match_results.</p>
+          )}
+
+          {matchResults !== null && (
+            <div className="space-y-2">
+              <div className="flex gap-4 text-xs">
+                <span style={{ color:'#94A3B8' }}>Totalt: <strong style={{ color:'#F1F5F9' }}>{matchResults.length}</strong> rader</span>
+                <span style={{ color:'#94A3B8' }}>Med result: <strong style={{ color: withResult.length > 0 ? '#34D399' : '#F87171' }}>{withResult.length}</strong></span>
+                <span style={{ color:'#94A3B8' }}>Utan result: <strong style={{ color: withoutResult.length > 0 ? '#F87171' : '#34D399' }}>{withoutResult.length}</strong></span>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* ─ VM-vinnare ─ */}
-        <div className="mt-4 pt-4" style={{ borderTop: '1px solid #223251' }}>
-          <p className="text-xs font-semibold mb-2" style={{ color: '#94A3B8' }}>VM-vinnare (20p) – sparas i tournament_results</p>
-          <div className="flex gap-2">
-            <input
-              value={vmWinnerInput}
-              onChange={e => setVmWinnerInput(e.target.value)}
-              placeholder="t.ex. Brasilien"
-              className="flex-1 rounded px-3 py-2"
-            />
-            <button
-              onClick={saveVmWinner}
-              disabled={loading}
-              className="px-4 py-2 rounded font-semibold"
-              style={{ background: '#F59E0B', color: '#0F172A' }}
-            >
-              Spara
-            </button>
-          </div>
-          {vmMessage && (
-            <div className="text-xs mt-2" style={{ color: vmMessage.startsWith('✓') ? '#34D399' : '#F87171' }}>
-              {vmMessage}
+              {matchResults.length === 0 && (
+                <p className="text-xs font-semibold" style={{ color:'#F87171' }}>
+                  ⚠ Tabellen är TOM – inga matchresultat har synkats ännu. match_pts = 0 för alla.
+                  Kör "Synka matchresultat nu" nedan.
+                </p>
+              )}
+
+              {withResult.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold mb-1" style={{ color:'#34D399' }}>Matcher med resultat (poänggrundande):</p>
+                  <div className="flex flex-wrap gap-1">
+                    {withResult.map(r => (
+                      <span key={r.match_id} className="text-xs px-1.5 py-0.5 rounded"
+                            style={{ background:'rgba(52,211,153,0.12)', color:'#34D399' }}>
+                        {r.match_id}: {r.home_goals}–{r.away_goals} ({r.result})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {withoutResult.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold mb-1" style={{ color:'#F59E0B' }}>Rader utan mål/result (räknas ej):</p>
+                  <div className="flex flex-wrap gap-1">
+                    {withoutResult.map(r => (
+                      <span key={r.match_id} className="text-xs px-1.5 py-0.5 rounded"
+                            style={{ background:'rgba(245,158,11,0.1)', color:'#F59E0B' }}>
+                        {r.match_id} (status: {r.status ?? '?'})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
+      )}
+
+      {/* ─ Synk från API-Football ─ */}
+      {!demo && (
+        <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
+          <p className="text-xs font-semibold mb-1" style={{ color:'#64748B' }}>API-FOOTBALL SYNK (FT / AET / PEN)</p>
+          <p className="text-xs mb-2" style={{ color:'#475569' }}>
+            Kräver att VITE_API_FOOTBALL_KEY är satt i Vercel-miljön.
+            Synkar match_id i format A1, B2 … mot league=1, season=2026.
+          </p>
+          <button
+            onClick={runApiSync}
+            disabled={syncing}
+            className="px-4 py-2 rounded font-semibold text-sm"
+            style={{ background: '#22C55E', color: '#052e16' }}
+          >
+            {syncing ? 'Synkar...' : '⚡ Synka matchresultat nu'}
+          </button>
+          {syncMessage && (
+            <div className="text-xs mt-2 break-all" style={{ color: syncMessage.startsWith('✓') ? '#34D399' : '#F87171' }}>
+              {syncMessage}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─ Manuell inmatning ─ */}
+      <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
+        <p className="text-xs font-semibold mb-2" style={{ color:'#64748B' }}>MANUELL INMATNING</p>
+        <p className="text-xs mb-2" style={{ color:'#475569' }}>
+          Ange match_id i appens format (t.ex. "A1", "F3") – INTE API-Football numeriska id:n.
+        </p>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <input value={matchId} onChange={e => setMatchId(e.target.value)} placeholder="match_id (t.ex. A1)"
+                   className="flex-1 rounded px-3 py-2" />
+            <button onClick={fetchResult} className="px-3 py-2 rounded" disabled={loading}
+                    style={{ background:'#334155', color:'#F1F5F9' }}>Hämta</button>
+          </div>
+
+          <div className="flex gap-2">
+            <input value={homeGoals} onChange={e => setHomeGoals(e.target.value)} placeholder="Hemma mål"
+                   className="w-24 rounded px-3 py-2" />
+            <input value={awayGoals} onChange={e => setAwayGoals(e.target.value)} placeholder="Borta mål"
+                   className="w-24 rounded px-3 py-2" />
+            <select value={status} onChange={e => setStatus(e.target.value)} className="rounded px-3 py-2">
+              <option>NS</option>
+              <option>1H</option>
+              <option>HT</option>
+              <option>2H</option>
+              <option>FT</option>
+              <option>AET</option>
+              <option>PEN</option>
+            </select>
+          </div>
+
+          <div className="flex gap-2">
+            <button onClick={saveResult} className="px-4 py-2 rounded font-semibold" style={{ background:'#F59E0B', color:'#0F172A' }} disabled={loading}>Spara</button>
+            <button onClick={() => { setMatchId(''); setHomeGoals(''); setAwayGoals(''); setStatus('FT'); setMessage(null) }} className="px-3 py-2 rounded" style={{ background:'#334155', color:'#F1F5F9' }}>Rensa</button>
+          </div>
+
+          {demo && (
+            <div className="mt-3">
+              <p className="text-xs" style={{ color:'#94A3B8' }}>Demo-läge: spara lokala resultat i localStorage.</p>
+              <div className="flex flex-col gap-2 mt-2">
+                <button onClick={() => { localStorage.removeItem('demo.match_results'); setMessage('Rensade lokala demo-resultat'); }} className="px-3 py-2 rounded" style={{ background:'#334155', color:'#F1F5F9' }}>Rensa lokalt</button>
+                <button onClick={pushDemoToSupabase} className="px-4 py-2 rounded font-semibold" style={{ background:'#06B6D4', color:'#042027' }} disabled={loading || !user || !profile?.is_admin}>Push lokala → Supabase</button>
+              </div>
+            </div>
+          )}
+
+          {message && <div className="text-xs mt-2" style={{ color: message.startsWith('Sparat') || message.startsWith('Pushed') || message.startsWith('Hämtat') ? '#34D399' : '#F87171' }}>{message}</div>}
+        </div>
+      </div>
+
+      {/* ─ VM-vinnare ─ */}
+      <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
+        <p className="text-xs font-semibold mb-1" style={{ color:'#64748B' }}>VM-VINNARE (20p)</p>
+        <p className="text-xs mb-2" style={{ color:'#475569' }}>Sparas i tournament_results.winner – matcha exakt mot vm_picks.vm_winner (ej skiftlägeskänsligt).</p>
+        <div className="flex gap-2">
+          <input
+            value={vmWinnerInput}
+            onChange={e => setVmWinnerInput(e.target.value)}
+            placeholder="t.ex. Brasilien"
+            className="flex-1 rounded px-3 py-2"
+          />
+          <button
+            onClick={saveVmWinner}
+            disabled={loading}
+            className="px-4 py-2 rounded font-semibold"
+            style={{ background: '#F59E0B', color: '#0F172A' }}
+          >
+            Spara
+          </button>
+        </div>
+        {vmMessage && (
+          <div className="text-xs mt-2" style={{ color: vmMessage.startsWith('✓') ? '#34D399' : '#F87171' }}>
+            {vmMessage}
+          </div>
+        )}
       </div>
     </div>
   )

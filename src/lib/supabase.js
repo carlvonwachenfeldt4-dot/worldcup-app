@@ -134,20 +134,39 @@ export async function savePlayerPrediction(userId, category, player, isConfirmed
 
 // ─── Match Results Sync ───────────────────────────────────────────────────────
 
-// Synka slutförda matchresultat från API-Football till Supabase
+// Hämta alla rader från match_results (diagnostik och admin)
+export async function fetchMatchResults() {
+  const { data, error } = await supabase
+    .from('match_results')
+    .select('match_id, home_goals, away_goals, status, result')
+    .order('match_id')
+  if (error) throw error
+  return data ?? []
+}
+
+// Synka slutförda matchresultat från API-Football till Supabase.
+// Returnerar { synced, matched, total, matchIds, error } för diagnostik.
 export async function syncMatchResultsFromAPI() {
   try {
+    if (!import.meta.env.VITE_API_FOOTBALL_KEY) {
+      const msg = 'VITE_API_FOOTBALL_KEY saknas – kan inte synka matchresultat'
+      console.warn(msg)
+      return { synced: 0, matched: 0, total: 0, matchIds: [], error: msg }
+    }
+
     const { getFixtures, matchApiToAppId } = await import('./apiFootball.js')
     const { APP_MATCHES_FLAT } = await import('../worldcup/data.js')
     const fixtures = await getFixtures()
 
-    if (!Array.isArray(fixtures)) {
-      console.warn('syncMatchResultsFromAPI: getFixtures() returnerade inget array')
-      return
+    if (!Array.isArray(fixtures) || fixtures.length === 0) {
+      const msg = `API-Football returnerade ${Array.isArray(fixtures) ? 0 : 'ogiltigt svar'} fixtures för league=1, season=2026`
+      console.warn(msg)
+      return { synced: 0, matched: 0, total: 0, matchIds: [], error: msg }
     }
 
     // Mappa API-fixtures till appens "A1"-format via lag- och datumjämförelse
     const mapping = matchApiToAppId(fixtures, APP_MATCHES_FLAT)
+    const matched = Object.keys(mapping).length
 
     const FINISHED = new Set(['FT', 'AET', 'PEN'])
     const rows = Object.entries(mapping)
@@ -160,14 +179,26 @@ export async function syncMatchResultsFromAPI() {
         status:     f.fixture.status?.short ?? 'FT',
         updated_at: new Date().toISOString(),
       }))
-    if (rows.length === 0) return
+
+    if (rows.length === 0) {
+      return { synced: 0, matched, total: fixtures.length, matchIds: [], error: null }
+    }
+
     const { error } = await supabase
       .from('match_results')
       .upsert(rows, { onConflict: 'match_id' })
-    if (error) console.warn('Batch-upsert fel:', error.message)
-    else if (import.meta.env.DEV) console.log(`✓ Synkade ${rows.length} matchresultat från API-Football`)
+
+    if (error) {
+      console.warn('Batch-upsert fel:', error.message)
+      return { synced: 0, matched, total: fixtures.length, matchIds: [], error: error.message }
+    }
+
+    const matchIds = rows.map(r => r.match_id)
+    if (import.meta.env.DEV) console.log(`✓ Synkade ${rows.length} matchresultat:`, matchIds)
+    return { synced: rows.length, matched, total: fixtures.length, matchIds, error: null }
   } catch (e) {
     console.warn('syncMatchResultsFromAPI fel:', e.message)
+    return { synced: 0, matched: 0, total: 0, matchIds: [], error: e.message }
   }
 }
 
