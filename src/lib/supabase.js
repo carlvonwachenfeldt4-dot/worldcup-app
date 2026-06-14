@@ -149,14 +149,15 @@ export async function syncMatchResultsFromAPI() {
     // Mappa API-fixtures till appens "A1"-format via lag- och datumjämförelse
     const mapping = matchApiToAppId(fixtures, APP_MATCHES_FLAT)
 
+    const FINISHED = new Set(['FT', 'AET', 'PEN'])
     const rows = Object.entries(mapping)
-      .filter(([, f]) => (f.fixture?.status?.short ?? 'NS') === 'FT')
+      .filter(([, f]) => FINISHED.has(f.fixture?.status?.short ?? 'NS'))
       .map(([appMatchId, f]) => ({
         match_id:   appMatchId,
         api_id:     f.fixture.id,
         home_goals: f.goals?.home ?? null,
         away_goals: f.goals?.away ?? null,
-        status:     'FT',
+        status:     f.fixture.status?.short ?? 'FT',
         updated_at: new Date().toISOString(),
       }))
     if (rows.length === 0) return

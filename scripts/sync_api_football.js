@@ -214,9 +214,10 @@ async function syncMatchResults() {
     throw new Error('getFixtures() returnerade inte en array.')
   }
 
+  const FINISHED = new Set(['FT', 'AET', 'PEN'])
   const mapping = matchApiToAppId(fixtures, APP_MATCHES_FLAT)
   const rows = Object.entries(mapping)
-    .filter(([, f]) => (f.fixture?.status?.short ?? 'NS') === 'FT')
+    .filter(([, f]) => FINISHED.has(f.fixture?.status?.short ?? 'NS'))
     .map(([appMatchId, f]) => ({
       match_id:   appMatchId,
       api_id:     f.fixture.id,

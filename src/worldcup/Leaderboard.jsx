@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { TOTAL_MATCHES } from './data'
 import { fetchLeaderboard, supabase } from '../lib/supabase'
 
@@ -19,6 +19,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
   const [dbBoard, setDbBoard] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [expandedId, setExpandedId] = useState(null)
 
   useEffect(() => {
     if (!user) return
@@ -92,11 +93,15 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
 
   const combined = (dbBoard ?? [])
     .map(u => ({
-      id:       u.id,
-      name:     u.username ?? u.name,
-      country:  u.country ?? '🌍',
-      pts:      u.total_pts ?? u.pts,
-      isMe:     user ? u.id === user.id : false,
+      id:          u.id,
+      name:        u.username ?? u.name,
+      country:     u.country ?? '🌍',
+      pts:         u.total_pts ?? u.pts,
+      match_pts:   u.match_pts   ?? 0,
+      bracket_pts: u.bracket_pts ?? 0,
+      player_pts:  u.player_pts  ?? 0,
+      vm_pts:      u.vm_pts      ?? 0,
+      isMe:        user ? u.id === user.id : false,
     }))
     .sort((a, b) => b.pts - a.pts)
     .map((u, i) => ({
@@ -174,7 +179,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
           </div>
         )}
 
-        <div className="divide-y" style={{ borderColor: '#334155' }}>
+        <div>
           {combined.length === 0 && (
             <div className="px-4 py-10 text-center">
               <p className="text-sm" style={{ color: '#64748B' }}>
@@ -182,54 +187,87 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
               </p>
             </div>
           )}
-          {combined.map(u => {
+          {combined.map((u, idx) => {
             const t = getTier(u.pts)
+            const isExpanded = expandedId === u.id
             return (
               <div
                 key={u.id}
-                className="flex items-center gap-4 px-4 py-3"
-                style={{
-                  background: u.isMe ? 'rgba(245,158,11,0.07)' : 'transparent',
-                  borderLeft: `3px solid ${u.isMe ? '#F59E0B' : 'transparent'}`,
-                }}
+                style={{ borderTop: idx === 0 ? 'none' : '1px solid #334155' }}
               >
-                <div className="w-8 text-center shrink-0">
-                  {u.medal
-                    ? <span className="text-xl">{u.medal}</span>
-                    : <span className="text-sm font-bold" style={{ color: '#475569' }}>#{u.rank}</span>}
-                </div>
-
+                {/* Klickbar huvud-rad */}
                 <div
-                  className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
-                  style={{ background: u.isMe ? '#F59E0B' : '#334155',
-                           color:      u.isMe ? '#0F172A' : '#94A3B8' }}
+                  className="flex items-center gap-4 px-4 py-3 cursor-pointer select-none"
+                  style={{
+                    background: u.isMe ? 'rgba(245,158,11,0.07)' : 'transparent',
+                    borderLeft: `3px solid ${u.isMe ? '#F59E0B' : 'transparent'}`,
+                  }}
+                  onClick={() => setExpandedId(isExpanded ? null : u.id)}
                 >
-                  {u.isMe ? '🧑' : u.name.charAt(0)}
-                </div>
+                  <div className="w-8 text-center shrink-0">
+                    {u.medal
+                      ? <span className="text-xl">{u.medal}</span>
+                      : <span className="text-sm font-bold" style={{ color: '#475569' }}>#{u.rank}</span>}
+                  </div>
 
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold truncate"
-                     style={{ color: u.isMe ? '#F59E0B' : '#F1F5F9' }}>
-                    {u.name} {u.country}
-                  </p>
-                  <p className="text-xs" style={{ color: t.color }}>{t.label}</p>
-                </div>
+                  <div
+                    className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                    style={{ background: u.isMe ? '#F59E0B' : '#334155',
+                             color:      u.isMe ? '#0F172A' : '#94A3B8' }}
+                  >
+                    {u.isMe ? '🧑' : u.name.charAt(0)}
+                  </div>
 
-                <div className="shrink-0 text-right">
-                  <p className="font-black" style={{ color: u.isMe ? '#F59E0B' : '#F1F5F9' }}>
-                    {u.pts}
-                  </p>
-                  <div className="w-16 h-1.5 rounded-full mt-1 overflow-hidden"
-                       style={{ background: '#334155' }}>
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${Math.min(100, (u.pts / 250) * 100)}%`,
-                        background: u.isMe ? '#F59E0B' : '#3B82F6',
-                      }}
-                    />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate"
+                       style={{ color: u.isMe ? '#F59E0B' : '#F1F5F9' }}>
+                      {u.name} {u.country}
+                    </p>
+                    <p className="text-xs" style={{ color: t.color }}>{t.label}</p>
+                  </div>
+
+                  <div className="shrink-0 text-right">
+                    <p className="font-black" style={{ color: u.isMe ? '#F59E0B' : '#F1F5F9' }}>
+                      {u.pts}
+                    </p>
+                    <div className="w-16 h-1.5 rounded-full mt-1 overflow-hidden"
+                         style={{ background: '#334155' }}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(100, (u.pts / 250) * 100)}%`,
+                          background: u.isMe ? '#F59E0B' : '#3B82F6',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 w-4 text-center" style={{ color: '#475569', fontSize: 10 }}>
+                    {isExpanded ? '▲' : '▼'}
                   </div>
                 </div>
+
+                {/* Expanderad poänguppdelning */}
+                {isExpanded && (
+                  <div
+                    className="px-4 py-3"
+                    style={{ background: 'rgba(15,23,42,0.6)', borderTop: '1px solid #1E293B' }}
+                  >
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 max-w-xs">
+                      {[
+                        ['🎯 Matchresultat (1X2)', u.match_pts,   '#34D399'],
+                        ['🏆 Bracket-picks',       u.bracket_pts, '#3B82F6'],
+                        ['⚽ Spelare',              u.player_pts,  '#F59E0B'],
+                        ['🌟 VM-vinnare',           u.vm_pts,      '#F87171'],
+                      ].map(([label, pts, color]) => (
+                        <Fragment key={label}>
+                          <span className="text-xs" style={{ color: '#94A3B8' }}>{label}</span>
+                          <span className="text-xs font-bold" style={{ color }}>{pts}p</span>
+                        </Fragment>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )
           })}

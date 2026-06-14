@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, syncMatchResultsFromAPI, syncPlayerStatsFromAPI } from '../lib/supabase'
 
 export default function AdminPanel({ demo = false, user = null, profile = null }) {
   const [matchId, setMatchId] = useState('')
@@ -10,6 +10,8 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
   const [message, setMessage] = useState(null)
   const [vmWinnerInput, setVmWinnerInput] = useState('')
   const [vmMessage, setVmMessage] = useState(null)
+  const [syncMessage, setSyncMessage] = useState(null)
+  const [syncing, setSyncing] = useState(false)
 
   async function fetchResult() {
     if (!matchId) return setMessage('Ange match_id')
@@ -86,6 +88,17 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
     } finally { setLoading(false) }
   }
 
+  async function runApiSync() {
+    setSyncing(true); setSyncMessage(null)
+    try {
+      await syncMatchResultsFromAPI()
+      await syncPlayerStatsFromAPI()
+      setSyncMessage('✓ Synk klar – matchresultat och spelarstatistik uppdaterade')
+    } catch (e) {
+      setSyncMessage('Synk-fel: ' + (e.message || e))
+    } finally { setSyncing(false) }
+  }
+
   async function pushDemoToSupabase() {
     setLoading(true); setMessage(null)
     try {
@@ -159,6 +172,26 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
         )}
 
         {message && <div className="text-xs mt-2" style={{ color:'#CBD5E1' }}>{message}</div>}
+
+        {/* ─ Synk från API-Football ─ */}
+        {!demo && (
+          <div className="mt-4 pt-4" style={{ borderTop: '1px solid #223251' }}>
+            <p className="text-xs font-semibold mb-2" style={{ color: '#94A3B8' }}>API-Football synk – hämtar alla färdiga matcher (FT/AET/PEN)</p>
+            <button
+              onClick={runApiSync}
+              disabled={syncing}
+              className="px-4 py-2 rounded font-semibold"
+              style={{ background: '#22C55E', color: '#052e16' }}
+            >
+              {syncing ? 'Synkar...' : '⚡ Synka matchresultat nu'}
+            </button>
+            {syncMessage && (
+              <div className="text-xs mt-2" style={{ color: syncMessage.startsWith('✓') ? '#34D399' : '#F87171' }}>
+                {syncMessage}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ─ VM-vinnare ─ */}
         <div className="mt-4 pt-4" style={{ borderTop: '1px solid #223251' }}>
