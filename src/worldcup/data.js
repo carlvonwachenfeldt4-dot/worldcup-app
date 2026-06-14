@@ -91,12 +91,12 @@ export const MATCHES_BY_GROUP = {
     {id:'E6',dt:'2026-06-25T22:00',home:'CIV',away:'CUW'},
   ],
   F:[
-    {id:'F1',dt:'2026-06-14T22:00',home:'NED',away:'TUN'},
-    {id:'F2',dt:'2026-06-15T04:00',home:'SWE',away:'JPN'},
+    {id:'F1',dt:'2026-06-14T22:00',home:'NED',away:'JPN'},
+    {id:'F2',dt:'2026-06-15T04:00',home:'SWE',away:'TUN'},
     {id:'F3',dt:'2026-06-20T19:00',home:'NED',away:'SWE',note:'Midsommar 🌼'},
-    {id:'F4',dt:'2026-06-21T06:00',home:'TUN',away:'JPN'},
-    {id:'F5',dt:'2026-06-26T01:00',home:'SWE',away:'TUN'},
-    {id:'F6',dt:'2026-06-26T01:00',home:'NED',away:'JPN'},
+    {id:'F4',dt:'2026-06-21T06:00',home:'JPN',away:'TUN'},
+    {id:'F5',dt:'2026-06-26T01:00',home:'JPN',away:'SWE'},
+    {id:'F6',dt:'2026-06-26T01:00',home:'NED',away:'TUN'},
   ],
   G:[
     {id:'G1',dt:'2026-06-15T21:00',home:'BEL',away:'NZL'},
