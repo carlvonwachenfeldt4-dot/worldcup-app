@@ -1,6 +1,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import { TOTAL_MATCHES } from './data'
 import { fetchLeaderboard, supabase } from '../lib/supabase'
+import UserProfileModal from './UserProfileModal'
 
 function calcMyScore(groupTips, bracketTips) {
   return Object.values(groupTips).filter(Boolean).length * 3
@@ -20,6 +21,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [expandedId, setExpandedId] = useState(null)
+  const [profileUser, setProfileUser] = useState(null)
 
   useEffect(() => {
     if (!user) return
@@ -91,7 +93,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
 
   const myScore = calcMyScore(groupTips, bracketTips)
 
-  const combined = (dbBoard ?? [])
+  const rawSorted = (dbBoard ?? [])
     .map(u => ({
       id:          u.id,
       name:        u.username ?? u.name,
@@ -104,11 +106,13 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
       isMe:        user ? u.id === user.id : false,
     }))
     .sort((a, b) => b.pts - a.pts)
-    .map((u, i) => ({
-      ...u,
-      rank:  i + 1,
-      medal: i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null,
-    }))
+
+  const combined = rawSorted.map((u, i) => ({
+    ...u,
+    rank:              i + 1,
+    medal:             i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : null,
+    totalParticipants: rawSorted.length,
+  }))
 
   const myEntry    = combined.find(u => u.isMe)
   const displayPts = myEntry?.pts ?? myScore
@@ -116,6 +120,11 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
 
   return (
     <div className="space-y-5 max-w-2xl mx-auto">
+
+      {/* Profilmodal */}
+      {profileUser && (
+        <UserProfileModal profileUser={profileUser} onClose={() => setProfileUser(null)} />
+      )}
 
       {/* Min sammanfattning */}
       <div
@@ -219,10 +228,14 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
                   </div>
 
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold truncate"
-                       style={{ color: u.isMe ? '#F59E0B' : '#F1F5F9' }}>
+                    <button
+                      className="text-sm font-semibold truncate block max-w-full text-left hover:underline underline-offset-2"
+                      style={{ color: u.isMe ? '#F59E0B' : '#F1F5F9', background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+                      onClick={e => { e.stopPropagation(); setProfileUser(u) }}
+                      title={`Visa ${u.name}s profil`}
+                    >
                       {u.name} {u.country}
-                    </p>
+                    </button>
                     <p className="text-xs" style={{ color: t.color }}>{t.label}</p>
                   </div>
 

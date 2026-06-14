@@ -292,6 +292,33 @@ export async function fetchPlayerStats() {
   return result
 }
 
+// ─── Publik användarprofil (visas via profilmodal i leaderboard) ─────────────
+
+// Hämtar en annan användares spelar-tipsningar och VM-vinnartips.
+// Möjligt tack vare FOR SELECT USING (true) på player_predictions och vm_picks.
+export async function fetchUserPublicProfile(userId) {
+  const [predsRes, vmRes] = await Promise.all([
+    supabase
+      .from('player_predictions')
+      .select('category, player_name, player_nation')
+      .eq('user_id', userId),
+    supabase
+      .from('vm_picks')
+      .select('vm_winner')
+      .eq('user_id', userId)
+      .maybeSingle(),
+  ])
+  if (predsRes.error) throw predsRes.error
+  const predictions = {}
+  for (const r of predsRes.data ?? []) {
+    predictions[r.category] = { name: r.player_name, nation: r.player_nation }
+  }
+  return {
+    predictions,
+    vmWinner: vmRes.data?.vm_winner ?? null,
+  }
+}
+
 // ─── Profile helpers: get, avatar upload + profile update ────────────────
 
 export async function getProfile(userId) {

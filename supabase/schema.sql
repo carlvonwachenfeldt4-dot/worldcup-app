@@ -242,10 +242,12 @@ CREATE POLICY "Egna bracket: delete"        ON public.bracket_picks FOR DELETE U
 
 -- Spelar-tipsningar
 DROP POLICY IF EXISTS "Egna spelartips: select"     ON public.player_predictions;
+DROP POLICY IF EXISTS "Alla kan läsa spelartips"    ON public.player_predictions;
 DROP POLICY IF EXISTS "Egna spelartips: insert"     ON public.player_predictions;
 DROP POLICY IF EXISTS "Egna spelartips: update"     ON public.player_predictions;
 
-CREATE POLICY "Egna spelartips: select"     ON public.player_predictions FOR SELECT USING (auth.uid() = user_id);
+-- SELECT öppen för alla – profilsidor visar andras val
+CREATE POLICY "Alla kan läsa spelartips"    ON public.player_predictions FOR SELECT USING (true);
 CREATE POLICY "Egna spelartips: insert"     ON public.player_predictions FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Egna spelartips: update"     ON public.player_predictions FOR UPDATE USING (auth.uid() = user_id);
 
@@ -491,7 +493,8 @@ DROP POLICY IF EXISTS "Vinnarpicks select" ON public.vm_picks;
 DROP POLICY IF EXISTS "Vinnarpicks own upsert" ON public.vm_picks;
 DROP POLICY IF EXISTS "Vinnarpicks own update" ON public.vm_picks;
 DROP POLICY IF EXISTS "Vinnarpicks own delete" ON public.vm_picks;
-CREATE POLICY "Vinnarpicks select" ON public.vm_picks FOR SELECT USING (auth.uid() = user_id);
+-- SELECT öppen för alla – profilsidor visar andras VM-vinnartips
+CREATE POLICY "Alla kan läsa vinnarpicks"  ON public.vm_picks FOR SELECT USING (true);
 CREATE POLICY "Vinnarpicks own upsert" ON public.vm_picks FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Vinnarpicks own update" ON public.vm_picks FOR UPDATE USING (auth.uid() = user_id);
 CREATE POLICY "Vinnarpicks own delete" ON public.vm_picks FOR DELETE USING (auth.uid() = user_id);
