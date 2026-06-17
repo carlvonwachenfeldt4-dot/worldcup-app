@@ -365,21 +365,30 @@ export async function loadBonusQuestions() {
 }
 
 export async function loadBonusPicks(userId) {
+  console.log('[supabase] loadBonusPicks → user_id:', userId)
   const { data, error } = await supabase
     .from('bonus_picks')
     .select('bonus_question_id, chosen_option')
     .eq('user_id', userId)
+  console.log('[supabase] loadBonusPicks ←', { count: data?.length ?? 0, data, error })
   if (error) throw error
   return data ?? []
 }
 
+// RLS requirement for bonus_picks:
+//   INSERT: (user_id = auth.uid())
+//   UPDATE: (user_id = auth.uid())
+//   SELECT: (user_id = auth.uid())
 export async function saveBonusPick(userId, bonusQuestionId, chosenOption) {
-  const { error } = await supabase
+  console.log('[supabase] saveBonusPick →', { userId, bonusQuestionId, chosenOption })
+  const { data, error } = await supabase
     .from('bonus_picks')
     .upsert(
       { user_id: userId, bonus_question_id: bonusQuestionId, chosen_option: chosenOption },
       { onConflict: 'user_id,bonus_question_id' }
     )
+    .select()
+  console.log('[supabase] saveBonusPick ←', { data, error })
   if (error) throw error
 }
 
