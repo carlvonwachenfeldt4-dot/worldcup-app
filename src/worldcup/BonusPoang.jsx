@@ -3,9 +3,7 @@ import { loadBonusQuestions, loadBonusPicks, saveBonusPick } from '../lib/supaba
 
 export default function BonusPoang({ user }) {
   const [questions,       setQuestions]       = useState([])
-  // savedPicks = what is confirmed saved in bonus_picks (DB source of truth)
-  const [savedPicks,      setSavedPicks]      = useState({})  // { [groupId]: chosenOption }
-  // localSelections = what user has clicked in UI (may differ from savedPicks)
+  // localSelections: initialised from DB once on login, then only updated by handleSelect
   const [localSelections, setLocalSelections] = useState({})  // { [groupId]: optionNum }
   const [loading,         setLoading]         = useState(true)
   const [saveError,       setSaveError]       = useState(null)
@@ -19,12 +17,10 @@ export default function BonusPoang({ user }) {
       .finally(() => setLoading(false))
   }, [])
 
-  // Load saved picks from DB when user logs in – initialises both states once.
-  // localSelections is NOT reset here on re-render; only when user.id changes.
+  // Initialise localSelections from DB once when user.id changes.
+  // After this point only handleSelect may update localSelections – never save logic.
   useEffect(() => {
     if (!user?.id) {
-      console.log('[BonusPoang] user utloggad – rensar state')
-      setSavedPicks({})
       setLocalSelections({})
       return
     }
@@ -34,20 +30,10 @@ export default function BonusPoang({ user }) {
         const map = {}
         for (const p of data) map[p.bonus_question_id] = p.chosen_option
         console.log('[BonusPoang] loadBonusPicks →', map)
-        setSavedPicks(map)
-        setLocalSelections(map)  // init once from DB; not overwritten until user.id changes
+        setLocalSelections(map)
       })
       .catch(e => console.warn('[BonusPoang] loadBonusPicks fel:', e.message))
   }, [user?.id])
-
-  // Log state changes to help diagnose stale-selection bugs
-  useEffect(() => {
-    console.log('[BonusPoang] savedPicks uppdaterat:', savedPicks)
-  }, [savedPicks])
-
-  useEffect(() => {
-    console.log('[BonusPoang] localSelections uppdaterat:', localSelections)
-  }, [localSelections])
 
   const groups = useMemo(() => {
     const map = new Map()
@@ -77,9 +63,9 @@ export default function BonusPoang({ user }) {
         console.error('[BonusPoang] saveBonusPick error:', error)
         setSaveError(`Kunde inte spara: ${error.message}`)
       } else {
-        // Update savedPicks locally – no DB re-fetch needed
-        setSavedPicks(p => ({ ...p, [group.groupId]: selected }))
-        console.log('[BonusPoang] sparat OK – savedPicks[groupId] =', selected)
+        // localSelections already holds the correct value (set by handleSelect on click)
+        // Do NOT touch localSelections here
+        console.log('[BonusPoang] sparat OK, groupId:', group.groupId, 'val:', selected)
         setPickSuccess(p => ({ ...p, [group.groupId]: true }))
         setTimeout(() => setPickSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
       }
