@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
-import { loadBonusQuestions, loadBonusPicks, saveBonusPick, setBonusCorrectOption } from '../lib/supabase'
+import { loadBonusQuestions, loadBonusPicks, saveBonusPick } from '../lib/supabase'
 
-export default function BonusPoang({ user, isAdmin }) {
+export default function BonusPoang({ user }) {
   const [questions,        setQuestions]        = useState([])
   const [savedPicks,       setSavedPicks]       = useState({})  // { [groupId]: chosenOption } – from DB
   const [localSelections,  setLocalSelections]  = useState({})  // { [groupId]: optionNum } – UI only
@@ -9,8 +9,6 @@ export default function BonusPoang({ user, isAdmin }) {
   const [saveError,        setSaveError]        = useState(null)
   const [pickSaving,       setPickSaving]       = useState({})  // { [groupId]: bool }
   const [pickSuccess,      setPickSuccess]      = useState({})  // { [groupId]: bool }
-  const [adminInputs,      setAdminInputs]      = useState({})  // { [matchLabel]: string }
-  const [adminSaving,      setAdminSaving]      = useState({})  // { [matchLabel]: bool }
 
   useEffect(() => {
     loadBonusQuestions()
@@ -65,31 +63,6 @@ export default function BonusPoang({ user, isAdmin }) {
       setSaveError(`Kunde inte spara: ${err.message}`)
     } finally {
       setPickSaving(p => ({ ...p, [group.groupId]: false }))
-    }
-  }
-
-  async function handleAdminSave(group) {
-    const raw = adminInputs[group.label] ?? String(group.correctOption ?? '')
-    const val = parseInt(raw, 10)
-    console.log('[BonusPoang] handleAdminSave', { matchLabel: group.label, raw, val })
-    if (![1, 2, 3, 4].includes(val)) {
-      console.warn('[BonusPoang] Ogiltigt värde – avbryter (måste vara 1–4):', raw)
-      setSaveError('Ange ett heltal 1–4 innan du sparar')
-      return
-    }
-    setAdminSaving(p => ({ ...p, [group.label]: true }))
-    try {
-      console.log('[BonusPoang] Anropar setBonusCorrectOption', { matchLabel: group.label, val })
-      await setBonusCorrectOption(group.label, val)
-      console.log('[BonusPoang] ✓ Sparades korrekt')
-      setQuestions(prev =>
-        prev.map(q => q.match_label === group.label ? { ...q, correct_option: val } : q)
-      )
-    } catch (err) {
-      console.error('[BonusPoang] setBonusCorrectOption fel:', err)
-      setSaveError(`Kunde inte spara rätt svar: ${err.message}`)
-    } finally {
-      setAdminSaving(p => ({ ...p, [group.label]: false }))
     }
   }
 
@@ -252,40 +225,6 @@ export default function BonusPoang({ user, isAdmin }) {
                   )}
                 </div>
 
-                {/* Admin controls */}
-                {isAdmin && (
-                  <div className="px-3 pb-3 pt-1 flex items-center gap-2 flex-wrap"
-                       style={{ borderTop: '1px solid #0F172A' }}>
-                    <span className="text-xs font-semibold" style={{ color: '#64748B' }}>
-                      Admin – rätt svar (1–4):
-                    </span>
-                    <input
-                      type="number"
-                      min={1} max={4}
-                      value={adminInputs[group.label] ?? (group.correctOption !== null ? String(group.correctOption) : '')}
-                      onChange={e => setAdminInputs(p => ({ ...p, [group.label]: e.target.value }))}
-                      placeholder="1–4"
-                      className="w-14 px-2 py-1 rounded-lg text-sm text-center outline-none"
-                      style={{ background: '#0F172A', border: '1px solid #475569', color: '#F1F5F9' }}
-                    />
-                    <button
-                      onClick={() => handleAdminSave(group)}
-                      disabled={adminSaving[group.label]}
-                      className="px-3 py-1 rounded-lg text-xs font-bold transition-all"
-                      style={{
-                        background: adminSaving[group.label] ? '#334155' : '#F59E0B',
-                        color:      adminSaving[group.label] ? '#64748B' : '#0F172A',
-                      }}
-                    >
-                      {adminSaving[group.label] ? '...' : 'Sätt rätt svar'}
-                    </button>
-                    {group.correctOption !== null && (
-                      <span className="text-xs font-semibold" style={{ color: '#4ADE80' }}>
-                        ✓ Satt till {group.correctOption}
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
             )
           })}

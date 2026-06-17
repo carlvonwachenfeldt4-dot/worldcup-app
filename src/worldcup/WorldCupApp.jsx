@@ -575,7 +575,7 @@ export default function WorldCupApp() {
             />
           </ErrorBoundary>
         )}
-        {tab === 'bonus' && <ErrorBoundary><BonusPoang user={user} isAdmin={profile?.is_admin === true} /></ErrorBoundary>}
+        {tab === 'bonus' && <ErrorBoundary><BonusPoang user={user} /></ErrorBoundary>}
         {tab === 'leaderboard'  && <ErrorBoundary><Leaderboard groupTips={tips} bracketTips={bracketTips} user={user} /></ErrorBoundary>}
         {tab === 'profile'      && <ErrorBoundary><Profile user={user} onBack={() => { setTab('groups'); window.history.pushState({}, '', '/') }} onSignOut={handleSignOut} profile={profile} rankInfo={rankInfo} tips={tips} bracketTips={bracketTips} userPredictions={userPredictions} /></ErrorBoundary>}
         {tab === 'admin'        && <ErrorBoundary><AdminPanel demo={DEMO_PREVIEW} user={user} profile={profile} /></ErrorBoundary>}
