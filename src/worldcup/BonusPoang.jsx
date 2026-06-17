@@ -72,14 +72,19 @@ export default function BonusPoang({ user }) {
     if (!selected || !user) return
     setPickSaving(p => ({ ...p, [group.groupId]: true }))
     try {
-      await saveBonusPick(user.id, group.groupId, selected)
-      // Update savedPicks locally – no DB re-fetch needed
-      setSavedPicks(p => ({ ...p, [group.groupId]: selected }))
-      console.log('[BonusPoang] sparat OK – savedPicks[groupId] =', selected)
-      setPickSuccess(p => ({ ...p, [group.groupId]: true }))
-      setTimeout(() => setPickSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
+      const { error } = await saveBonusPick(user.id, group.groupId, selected)
+      if (error) {
+        console.error('[BonusPoang] saveBonusPick error:', error)
+        setSaveError(`Kunde inte spara: ${error.message}`)
+      } else {
+        // Update savedPicks locally – no DB re-fetch needed
+        setSavedPicks(p => ({ ...p, [group.groupId]: selected }))
+        console.log('[BonusPoang] sparat OK – savedPicks[groupId] =', selected)
+        setPickSuccess(p => ({ ...p, [group.groupId]: true }))
+        setTimeout(() => setPickSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
+      }
     } catch (err) {
-      console.error('[BonusPoang] saveBonusPick fel:', err)
+      console.error('[BonusPoang] saveBonusPick oväntat fel:', err)
       setSaveError(`Kunde inte spara: ${err.message}`)
     } finally {
       setPickSaving(p => ({ ...p, [group.groupId]: false }))

@@ -379,6 +379,7 @@ export async function loadBonusPicks(userId) {
 //   INSERT: (user_id = auth.uid())
 //   UPDATE: (user_id = auth.uid())
 //   SELECT: (user_id = auth.uid())
+// unique constraint required: (user_id, bonus_question_id)
 export async function saveBonusPick(userId, bonusQuestionId, chosenOption) {
   console.log('[supabase] saveBonusPick →', { userId, bonusQuestionId, chosenOption })
   const { data, error } = await supabase
@@ -389,7 +390,7 @@ export async function saveBonusPick(userId, bonusQuestionId, chosenOption) {
     )
     .select()
   console.log('[supabase] saveBonusPick ←', { data, error })
-  if (error) throw error
+  return { data, error }
 }
 
 export async function setBonusCorrectOption(matchLabel, correctOption) {
