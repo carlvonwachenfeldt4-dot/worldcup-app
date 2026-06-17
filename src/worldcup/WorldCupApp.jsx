@@ -27,12 +27,12 @@ const DEMO_PREVIEW = typeof window !== 'undefined'
   && new URLSearchParams(window.location.search).get('demo') === '1'
 
 function BonusTab({ user }) {
-  const [groups,  setGroups]  = useState([])
-  const [picks,   setPicks]   = useState({})   // { groupId: chosen_option }
-  const [loading, setLoading] = useState(true)
-  const [saving,  setSaving]  = useState({})   // { groupId: bool }
-  const [success, setSuccess] = useState({})   // { groupId: bool }
-  const [err,     setErr]     = useState(null)
+  const [groups,     setGroups]     = useState([])
+  const [localPicks, setLocalPicks] = useState({})   // { bonus_question_id: chosen_option }
+  const [loading,    setLoading]    = useState(true)
+  const [saving,     setSaving]     = useState({})   // { bonus_question_id: bool }
+  const [success,    setSuccess]    = useState({})   // { bonus_question_id: bool }
+  const [err,        setErr]        = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -53,9 +53,10 @@ function BonusTab({ user }) {
         const sorted = [...opts].sort((a, b) => a.option_number - b.option_number)
         return { label, options: sorted, groupId: sorted[0].id }
       }))
+      // localPicks: bonus_question_id (= groupId = first option's UUID) → chosen_option
       const pm = {}
       for (const p of picksRes.data ?? []) pm[p.bonus_question_id] = p.chosen_option
-      setPicks(pm)
+      setLocalPicks(pm)
     }
     load().catch(e => setErr(e.message)).finally(() => setLoading(false))
   }, [user?.id])
@@ -72,7 +73,7 @@ function BonusTab({ user }) {
     if (error) {
       setErr(error.message)
     } else {
-      setPicks(p => ({ ...p, [groupId]: optionNum }))
+      setLocalPicks(p => ({ ...p, [groupId]: optionNum }))
       setSuccess(p => ({ ...p, [groupId]: true }))
       setTimeout(() => setSuccess(p => ({ ...p, [groupId]: false })), 2000)
     }
@@ -107,7 +108,7 @@ function BonusTab({ user }) {
       )}
 
       {groups.map(group => {
-        const saved = picks[group.groupId]
+        const saved = localPicks[group.groupId]
         return (
           <div key={group.label} style={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 16, overflow: 'hidden' }}>
             <div style={{ background: '#0F172A', padding: '0.75rem 1rem', borderBottom: '1px solid #334155' }}>
@@ -117,7 +118,7 @@ function BonusTab({ user }) {
             </div>
             <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {group.options.map(opt => {
-                const sel = saved === opt.option_number
+                const sel = localPicks[group.groupId] === opt.option_number
                 return (
                   <button
                     key={opt.id}
