@@ -1,38 +1,35 @@
 import { useState, useEffect, useMemo } from 'react'
-import { loadBonusQuestions, loadBonusPicks, saveBonusPick } from '../lib/supabase'
+import { supabase } from '../lib/supabase'
 
 export default function BonusPoang({ user }) {
-  const [questions,       setQuestions]       = useState([])
-  // localSelections: initialised from DB once on login, then only updated by handleSelect
-  const [localSelections, setLocalSelections] = useState({})  // { [groupId]: optionNum }
-  const [loading,         setLoading]         = useState(true)
-  const [saveError,       setSaveError]       = useState(null)
-  const [pickSaving,      setPickSaving]      = useState({})  // { [groupId]: bool }
-  const [pickSuccess,     setPickSuccess]     = useState({})  // { [groupId]: bool }
+  const [questions,      setQuestions]      = useState([])
+  const [userPick,       setUserPick]       = useState({})  // { [groupId]: chosen_option } – from DB
+  const [selectedOption, setSelectedOption] = useState({})  // { [groupId]: chosen_option } – local clicks
+  const [loading,        setLoading]        = useState(true)
+  const [saving,         setSaving]         = useState({})  // { [groupId]: bool }
+  const [saveError,      setSaveError]      = useState(null)
+  const [saveSuccess,    setSaveSuccess]    = useState({})  // { [groupId]: bool }
 
   useEffect(() => {
-    loadBonusQuestions()
-      .then(setQuestions)
-      .catch(e => console.warn('[BonusPoang] loadBonusQuestions fel:', e.message))
-      .finally(() => setLoading(false))
-  }, [])
-
-  // Initialise localSelections from DB once when user.id changes.
-  // After this point only handleSelect may update localSelections – never save logic.
-  useEffect(() => {
-    if (!user?.id) {
-      setLocalSelections({})
-      return
+    async function load() {
+      const [{ data: qs }, picksRes] = await Promise.all([
+        supabase
+          .from('bonus_questions')
+          .select('id, match_label, option_number, option_text')
+          .order('match_label')
+          .order('option_number'),
+        user?.id
+          ? supabase.from('bonus_picks').select('bonus_question_id, chosen_option').eq('user_id', user.id)
+          : Promise.resolve({ data: [] }),
+      ])
+      setQuestions(qs ?? [])
+      const map = {}
+      for (const p of picksRes.data ?? []) map[p.bonus_question_id] = p.chosen_option
+      setUserPick(map)
     }
-    console.log('[BonusPoang] laddar picks för user', user.id)
-    loadBonusPicks(user.id)
-      .then(data => {
-        const map = {}
-        for (const p of data) map[p.bonus_question_id] = p.chosen_option
-        console.log('[BonusPoang] loadBonusPicks →', map)
-        setLocalSelections(map)
-      })
-      .catch(e => console.warn('[BonusPoang] loadBonusPicks fel:', e.message))
+    load()
+      .catch(e => console.warn('[BonusPoang] load fel:', e.message))
+      .finally(() => setLoading(false))
   }, [user?.id])
 
   const groups = useMemo(() => {
@@ -47,33 +44,26 @@ export default function BonusPoang({ user }) {
     })
   }, [questions])
 
-  function handleSelect(groupId, optionNum) {
-    console.log('[BonusPoang] handleSelect', { groupId, optionNum })
-    setLocalSelections(p => ({ ...p, [groupId]: optionNum }))
-  }
-
-  async function handleSavePick(group) {
-    const selected = localSelections[group.groupId]
-    console.log('[BonusPoang] handleSavePick', { groupId: group.groupId, selected, userId: user?.id })
-    if (!selected || !user) return
-    setPickSaving(p => ({ ...p, [group.groupId]: true }))
+  async function handleSave(group) {
+    const chosen = selectedOption[group.groupId]
+    if (!chosen || !user?.id) return
+    setSaving(p => ({ ...p, [group.groupId]: true }))
     try {
-      const { error } = await saveBonusPick(user.id, group.groupId, selected)
+      const { error } = await supabase
+        .from('bonus_picks')
+        .upsert(
+          { user_id: user.id, bonus_question_id: group.groupId, chosen_option: chosen },
+          { onConflict: 'user_id,bonus_question_id' }
+        )
       if (error) {
-        console.error('[BonusPoang] saveBonusPick error:', error)
         setSaveError(`Kunde inte spara: ${error.message}`)
       } else {
-        // localSelections already holds the correct value (set by handleSelect on click)
-        // Do NOT touch localSelections here
-        console.log('[BonusPoang] sparat OK, groupId:', group.groupId, 'val:', selected)
-        setPickSuccess(p => ({ ...p, [group.groupId]: true }))
-        setTimeout(() => setPickSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
+        setUserPick(p => ({ ...p, [group.groupId]: chosen }))
+        setSaveSuccess(p => ({ ...p, [group.groupId]: true }))
+        setTimeout(() => setSaveSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
       }
-    } catch (err) {
-      console.error('[BonusPoang] saveBonusPick oväntat fel:', err)
-      setSaveError(`Kunde inte spara: ${err.message}`)
     } finally {
-      setPickSaving(p => ({ ...p, [group.groupId]: false }))
+      setSaving(p => ({ ...p, [group.groupId]: false }))
     }
   }
 
@@ -114,9 +104,10 @@ export default function BonusPoang({ user }) {
       ) : (
         <div className="space-y-4">
           {groups.map(group => {
-            const localSel  = localSelections[group.groupId]
-            const isSaving  = pickSaving[group.groupId]
-            const isSuccess = pickSuccess[group.groupId]
+            // Show local click first; fall back to saved DB pick for amber highlight
+            const displayed = selectedOption[group.groupId] ?? userPick[group.groupId]
+            const canSave   = !!selectedOption[group.groupId] && !saving[group.groupId]
+            const isSuccess = saveSuccess[group.groupId]
 
             return (
               <div key={group.label}
@@ -130,11 +121,11 @@ export default function BonusPoang({ user }) {
 
                 <div className="p-3 space-y-2">
                   {group.options.map(opt => {
-                    const isSelected = localSel === opt.option_number
+                    const isSelected = displayed === opt.option_number
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => handleSelect(group.groupId, opt.option_number)}
+                        onClick={() => setSelectedOption(p => ({ ...p, [group.groupId]: opt.option_number }))}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all active:scale-[0.98]"
                         style={{
                           background: isSelected ? 'rgba(245,158,11,0.08)' : 'transparent',
@@ -161,29 +152,17 @@ export default function BonusPoang({ user }) {
                 <div className="px-3 pb-3">
                   {user ? (
                     <button
-                      onClick={() => handleSavePick(group)}
-                      disabled={!localSel || isSaving}
+                      onClick={() => handleSave(group)}
+                      disabled={!canSave}
                       className="w-full py-2.5 rounded-xl text-sm font-bold transition-all active:scale-[0.98]"
                       style={{
-                        background: isSuccess
-                          ? 'rgba(34,197,94,0.15)'
-                          : (!localSel || isSaving)
-                            ? '#1E293B'
-                            : 'linear-gradient(135deg,#F59E0B,#D97706)',
-                        color: isSuccess
-                          ? '#4ADE80'
-                          : (!localSel || isSaving)
-                            ? '#475569'
-                            : '#0F172A',
-                        border: isSuccess
-                          ? '1px solid #22C55E'
-                          : (!localSel || isSaving)
-                            ? '1px solid #334155'
-                            : 'none',
-                        cursor: (!localSel || isSaving) ? 'not-allowed' : 'pointer',
+                        background: isSuccess ? 'rgba(34,197,94,0.15)' : canSave ? 'linear-gradient(135deg,#F59E0B,#D97706)' : '#1E293B',
+                        color:      isSuccess ? '#4ADE80'               : canSave ? '#0F172A'                                  : '#475569',
+                        border:     isSuccess ? '1px solid #22C55E'     : canSave ? 'none'                                     : '1px solid #334155',
+                        cursor:     canSave ? 'pointer' : 'not-allowed',
                       }}
                     >
-                      {isSaving ? '⏳ Sparar...' : isSuccess ? '✓ Sparat!' : 'Spara mitt val'}
+                      {saving[group.groupId] ? '⏳ Sparar...' : isSuccess ? '✓ Sparat!' : 'Spara mitt val'}
                     </button>
                   ) : (
                     <p className="text-xs text-center" style={{ color: '#475569' }}>
