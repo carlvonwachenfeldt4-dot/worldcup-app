@@ -5,6 +5,7 @@ import { supabase, signOut, loadGroupTips, saveGroupTip, deleteGroupTip,
 import GroupStage        from './GroupStage'
 import Bracket           from './Bracket'
 import Leaderboard       from './Leaderboard'
+import BonusPoang        from './BonusPoang'
 import AuthModal         from './AuthModal'
 import Profile           from './Profile'
 import AdminPanel        from './AdminPanel'
@@ -574,13 +575,7 @@ export default function WorldCupApp() {
             />
           </ErrorBoundary>
         )}
-        {tab === 'bonus' && (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="text-5xl mb-5">⭐</div>
-            <h2 className="text-2xl font-black mb-2" style={{ color: '#F1F5F9' }}>Bonuspoäng</h2>
-            <p className="text-sm" style={{ color: '#64748B' }}>Specialtips – kommer snart</p>
-          </div>
-        )}
+        {tab === 'bonus' && <ErrorBoundary><BonusPoang user={user} isAdmin={profile?.is_admin === true} /></ErrorBoundary>}
         {tab === 'leaderboard'  && <ErrorBoundary><Leaderboard groupTips={tips} bracketTips={bracketTips} user={user} /></ErrorBoundary>}
         {tab === 'profile'      && <ErrorBoundary><Profile user={user} onBack={() => { setTab('groups'); window.history.pushState({}, '', '/') }} onSignOut={handleSignOut} profile={profile} rankInfo={rankInfo} tips={tips} bracketTips={bracketTips} userPredictions={userPredictions} /></ErrorBoundary>}
         {tab === 'admin'        && <ErrorBoundary><AdminPanel demo={DEMO_PREVIEW} user={user} profile={profile} /></ErrorBoundary>}

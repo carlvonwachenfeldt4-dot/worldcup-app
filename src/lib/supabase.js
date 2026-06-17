@@ -352,6 +352,45 @@ export async function uploadAvatar(userId, file) {
   return publicUrl
 }
 
+// ─── Bonuspoäng ───────────────────────────────────────────────────────────────
+
+export async function loadBonusQuestions() {
+  const { data, error } = await supabase
+    .from('bonus_questions')
+    .select('id, match_label, option_number, option_text, correct_option')
+    .order('match_label')
+    .order('option_number')
+  if (error) throw error
+  return data ?? []
+}
+
+export async function loadBonusPicks(userId) {
+  const { data, error } = await supabase
+    .from('bonus_picks')
+    .select('bonus_question_id, chosen_option')
+    .eq('user_id', userId)
+  if (error) throw error
+  return data ?? []
+}
+
+export async function saveBonusPick(userId, bonusQuestionId, chosenOption) {
+  const { error } = await supabase
+    .from('bonus_picks')
+    .upsert(
+      { user_id: userId, bonus_question_id: bonusQuestionId, chosen_option: chosenOption },
+      { onConflict: 'user_id,bonus_question_id' }
+    )
+  if (error) throw error
+}
+
+export async function setBonusCorrectOption(matchLabel, correctOption) {
+  const { error } = await supabase
+    .from('bonus_questions')
+    .update({ correct_option: correctOption })
+    .eq('match_label', matchLabel)
+  if (error) throw error
+}
+
 export async function updateProfile(userId, updates) {
   const payload = { id: userId, ...updates, updated_at: new Date().toISOString() }
   const { data, error } = await supabase
