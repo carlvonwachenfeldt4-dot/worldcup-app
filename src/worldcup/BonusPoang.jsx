@@ -2,13 +2,12 @@ import { useState, useEffect, useMemo } from 'react'
 import { loadBonusQuestions, loadBonusPicks, saveBonusPick } from '../lib/supabase'
 
 export default function BonusPoang({ user }) {
-  const [questions,        setQuestions]        = useState([])
-  const [savedPicks,       setSavedPicks]       = useState({})  // { [groupId]: chosenOption } – from DB
-  const [localSelections,  setLocalSelections]  = useState({})  // { [groupId]: optionNum } – UI only
-  const [loading,          setLoading]          = useState(true)
-  const [saveError,        setSaveError]        = useState(null)
-  const [pickSaving,       setPickSaving]       = useState({})  // { [groupId]: bool }
-  const [pickSuccess,      setPickSuccess]      = useState({})  // { [groupId]: bool }
+  const [questions,       setQuestions]       = useState([])
+  const [localSelections, setLocalSelections] = useState({})  // { [groupId]: optionNum }
+  const [loading,         setLoading]         = useState(true)
+  const [saveError,       setSaveError]       = useState(null)
+  const [pickSaving,      setPickSaving]      = useState({})  // { [groupId]: bool }
+  const [pickSuccess,     setPickSuccess]     = useState({})  // { [groupId]: bool }
 
   useEffect(() => {
     loadBonusQuestions()
@@ -18,13 +17,12 @@ export default function BonusPoang({ user }) {
   }, [])
 
   useEffect(() => {
-    if (!user?.id) { setSavedPicks({}); setLocalSelections({}); return }
+    if (!user?.id) { setLocalSelections({}); return }
     loadBonusPicks(user.id)
       .then(data => {
         const map = {}
         for (const p of data) map[p.bonus_question_id] = p.chosen_option
-        setSavedPicks(map)
-        setLocalSelections(map)  // pre-populate so user sees their saved pick highlighted
+        setLocalSelections(map)
       })
       .catch(e => console.warn('Kunde inte hämta bonussvar:', e.message))
   }, [user?.id])
@@ -37,17 +35,12 @@ export default function BonusPoang({ user }) {
     }
     return [...map.entries()].map(([label, opts]) => {
       const sorted = [...opts].sort((a, b) => a.option_number - b.option_number)
-      return {
-        label,
-        options:       sorted,
-        groupId:       sorted[0]?.id,
-        correctOption: sorted[0]?.correct_option ?? null,
-      }
+      return { label, options: sorted, groupId: sorted[0]?.id }
     })
   }, [questions])
 
-  function handleSelect(group, optionNum) {
-    setLocalSelections(p => ({ ...p, [group.groupId]: optionNum }))
+  function handleSelect(groupId, optionNum) {
+    setLocalSelections(p => ({ ...p, [groupId]: optionNum }))
   }
 
   async function handleSavePick(group) {
@@ -56,7 +49,6 @@ export default function BonusPoang({ user }) {
     setPickSaving(p => ({ ...p, [group.groupId]: true }))
     try {
       await saveBonusPick(user.id, group.groupId, selected)
-      setSavedPicks(p => ({ ...p, [group.groupId]: selected }))
       setPickSuccess(p => ({ ...p, [group.groupId]: true }))
       setTimeout(() => setPickSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
     } catch (err) {
@@ -103,10 +95,8 @@ export default function BonusPoang({ user }) {
       ) : (
         <div className="space-y-4">
           {groups.map(group => {
-            const localSel  = localSelections[group.groupId]
-            const savedPick = savedPicks[group.groupId]
-            const correct   = group.correctOption
-            const isSaving  = pickSaving[group.groupId]
+            const localSel = localSelections[group.groupId]
+            const isSaving = pickSaving[group.groupId]
             const isSuccess = pickSuccess[group.groupId]
 
             return (
@@ -114,83 +104,41 @@ export default function BonusPoang({ user }) {
                    className="rounded-2xl overflow-hidden"
                    style={{ background: '#1E293B', border: '1px solid #334155' }}>
 
-                {/* Header */}
                 <div className="px-4 py-3"
                      style={{ background: '#0F172A', borderBottom: '1px solid #334155' }}>
                   <h3 className="font-bold text-sm" style={{ color: '#F1F5F9' }}>{group.label}</h3>
-                  {correct !== null && (
-                    <p className="text-xs mt-0.5 font-semibold" style={{ color: '#4ADE80' }}>
-                      ✓ Rätt svar: alternativ {correct}
-                    </p>
-                  )}
                 </div>
 
-                {/* Options */}
                 <div className="p-3 space-y-2">
                   {group.options.map(opt => {
-                    const isLocalSelected = localSel === opt.option_number
-                    const isSavedPick     = savedPick === opt.option_number
-                    const isCorrect       = correct === opt.option_number
-                    const isWrong         = isSavedPick && correct !== null && !isCorrect
-
-                    let border    = '#334155'
-                    let bg        = 'transparent'
-                    let numColor  = '#475569'
-                    let textColor = '#94A3B8'
-                    let opacity   = 1
-
-                    if (correct !== null) {
-                      if (isCorrect) {
-                        border = '#22C55E'; bg = 'rgba(34,197,94,0.08)'
-                        numColor = '#4ADE80'; textColor = '#4ADE80'
-                      } else if (isWrong) {
-                        border = '#EF4444'; bg = 'rgba(239,68,68,0.08)'
-                        numColor = '#F87171'; textColor = '#F87171'
-                      } else if (isLocalSelected) {
-                        border = '#F59E0B'
-                        numColor = '#F59E0B'; textColor = '#CBD5E1'
-                      } else {
-                        opacity = 0.35
-                      }
-                    } else if (isLocalSelected) {
-                      border = '#F59E0B'; bg = 'rgba(245,158,11,0.08)'
-                      numColor = '#F59E0B'; textColor = '#F1F5F9'
-                    }
-
+                    const isSelected = localSel === opt.option_number
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => handleSelect(group, opt.option_number)}
+                        onClick={() => handleSelect(group.groupId, opt.option_number)}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all active:scale-[0.98]"
                         style={{
-                          background: bg,
-                          border:     `1.5px solid ${border}`,
+                          background: isSelected ? 'rgba(245,158,11,0.08)' : 'transparent',
+                          border:     `1.5px solid ${isSelected ? '#F59E0B' : '#334155'}`,
                           cursor:     'pointer',
-                          opacity,
                         }}
                       >
                         <span className="text-sm font-black shrink-0 w-5 text-center"
-                              style={{ color: numColor }}>
+                              style={{ color: isSelected ? '#F59E0B' : '#475569' }}>
                           {opt.option_number}
                         </span>
-                        <span className="text-sm flex-1" style={{ color: textColor }}>
+                        <span className="text-sm flex-1"
+                              style={{ color: isSelected ? '#F1F5F9' : '#94A3B8' }}>
                           {opt.option_text}
                         </span>
-                        {isLocalSelected && !isCorrect && !isWrong && (
+                        {isSelected && (
                           <span className="text-base shrink-0" style={{ color: '#F59E0B' }}>●</span>
-                        )}
-                        {isCorrect && (
-                          <span className="text-base shrink-0 font-black" style={{ color: '#22C55E' }}>✓</span>
-                        )}
-                        {isWrong && (
-                          <span className="text-base shrink-0 font-black" style={{ color: '#EF4444' }}>✗</span>
                         )}
                       </button>
                     )
                   })}
                 </div>
 
-                {/* User save button */}
                 <div className="px-3 pb-3">
                   {user ? (
                     <button
@@ -208,10 +156,10 @@ export default function BonusPoang({ user }) {
                           : (!localSel || isSaving)
                             ? '#475569'
                             : '#0F172A',
-                        border: (!localSel || isSaving) && !isSuccess
-                          ? '1px solid #334155'
-                          : isSuccess
-                            ? '1px solid #22C55E'
+                        border: isSuccess
+                          ? '1px solid #22C55E'
+                          : (!localSel || isSaving)
+                            ? '1px solid #334155'
                             : 'none',
                         cursor: (!localSel || isSaving) ? 'not-allowed' : 'pointer',
                       }}
