@@ -58,7 +58,12 @@ export default function BonusPoang({ user }) {
       if (error) {
         setSaveError(`Kunde inte spara: ${error.message}`)
       } else {
-        setUserPick(p => ({ ...p, [group.groupId]: chosen }))
+        console.log('FÖRE setUserPick:', userPick)
+        setUserPick(prev => {
+          const next = { ...prev, [group.groupId]: chosen }
+          console.log('EFTER setUserPick:', next)
+          return next
+        })
         setSaveSuccess(p => ({ ...p, [group.groupId]: true }))
         setTimeout(() => setSaveSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
       }
@@ -66,6 +71,8 @@ export default function BonusPoang({ user }) {
       setSaving(p => ({ ...p, [group.groupId]: false }))
     }
   }
+
+  console.log('RENDER userPick:', userPick, 'selectedOption:', selectedOption)
 
   if (loading) {
     return (
