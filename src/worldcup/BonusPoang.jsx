@@ -55,15 +55,23 @@ export default function BonusPoang({ user, isAdmin }) {
   async function handleAdminSave(group) {
     const raw = adminInputs[group.label] ?? String(group.correctOption ?? '')
     const val = parseInt(raw, 10)
-    if (![1, 2, 3, 4].includes(val)) return
+    console.log('[BonusPoang] handleAdminSave', { matchLabel: group.label, raw, val })
+    if (![1, 2, 3, 4].includes(val)) {
+      console.warn('[BonusPoang] Ogiltigt värde – avbryter (måste vara 1–4):', raw)
+      setSaveError('Ange ett heltal 1–4 innan du sparar')
+      return
+    }
     setAdminSaving(p => ({ ...p, [group.label]: true }))
     try {
+      console.log('[BonusPoang] Anropar setBonusCorrectOption', { matchLabel: group.label, val })
       await setBonusCorrectOption(group.label, val)
+      console.log('[BonusPoang] ✓ Sparades korrekt')
       setQuestions(prev =>
         prev.map(q => q.match_label === group.label ? { ...q, correct_option: val } : q)
       )
-    } catch {
-      setSaveError('Kunde inte spara rätt svar')
+    } catch (err) {
+      console.error('[BonusPoang] setBonusCorrectOption fel:', err)
+      setSaveError(`Kunde inte spara rätt svar: ${err.message}`)
     } finally {
       setAdminSaving(p => ({ ...p, [group.label]: false }))
     }

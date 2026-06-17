@@ -384,10 +384,13 @@ export async function saveBonusPick(userId, bonusQuestionId, chosenOption) {
 }
 
 export async function setBonusCorrectOption(matchLabel, correctOption) {
-  const { error } = await supabase
+  console.log('[supabase] setBonusCorrectOption →', { matchLabel, correctOption })
+  const { data, error } = await supabase
     .from('bonus_questions')
     .update({ correct_option: correctOption })
     .eq('match_label', matchLabel)
+    .select('id, match_label, correct_option')
+  console.log('[supabase] setBonusCorrectOption ←', { updatedRows: data?.length ?? 0, data, error })
   if (error) throw error
 }
 
