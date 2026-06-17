@@ -2,12 +2,15 @@ import { useState, useEffect, useMemo } from 'react'
 import { loadBonusQuestions, loadBonusPicks, saveBonusPick, setBonusCorrectOption } from '../lib/supabase'
 
 export default function BonusPoang({ user, isAdmin }) {
-  const [questions,   setQuestions]   = useState([])
-  const [picks,       setPicks]       = useState({})   // { [groupId]: chosenOption }
-  const [loading,     setLoading]     = useState(true)
-  const [saveError,   setSaveError]   = useState(null)
-  const [adminInputs, setAdminInputs] = useState({})   // { [matchLabel]: string }
-  const [adminSaving, setAdminSaving] = useState({})   // { [matchLabel]: bool }
+  const [questions,        setQuestions]        = useState([])
+  const [savedPicks,       setSavedPicks]       = useState({})  // { [groupId]: chosenOption } – from DB
+  const [localSelections,  setLocalSelections]  = useState({})  // { [groupId]: optionNum } – UI only
+  const [loading,          setLoading]          = useState(true)
+  const [saveError,        setSaveError]        = useState(null)
+  const [pickSaving,       setPickSaving]       = useState({})  // { [groupId]: bool }
+  const [pickSuccess,      setPickSuccess]      = useState({})  // { [groupId]: bool }
+  const [adminInputs,      setAdminInputs]      = useState({})  // { [matchLabel]: string }
+  const [adminSaving,      setAdminSaving]      = useState({})  // { [matchLabel]: bool }
 
   useEffect(() => {
     loadBonusQuestions()
@@ -17,17 +20,17 @@ export default function BonusPoang({ user, isAdmin }) {
   }, [])
 
   useEffect(() => {
-    if (!user?.id) { setPicks({}); return }
+    if (!user?.id) { setSavedPicks({}); setLocalSelections({}); return }
     loadBonusPicks(user.id)
       .then(data => {
         const map = {}
         for (const p of data) map[p.bonus_question_id] = p.chosen_option
-        setPicks(map)
+        setSavedPicks(map)
+        setLocalSelections(map)  // pre-populate so user sees their saved pick highlighted
       })
       .catch(e => console.warn('Kunde inte hämta bonussvar:', e.message))
   }, [user?.id])
 
-  // Group rows by match_label; use first option's id as the group identifier
   const groups = useMemo(() => {
     const map = new Map()
     for (const q of questions) {
@@ -38,18 +41,31 @@ export default function BonusPoang({ user, isAdmin }) {
       const sorted = [...opts].sort((a, b) => a.option_number - b.option_number)
       return {
         label,
-        options: sorted,
+        options:       sorted,
         groupId:       sorted[0]?.id,
         correctOption: sorted[0]?.correct_option ?? null,
       }
     })
   }, [questions])
 
-  function handlePick(group, optionNum) {
-    if (!user || group.correctOption !== null) return
-    setPicks(p => ({ ...p, [group.groupId]: optionNum }))
-    saveBonusPick(user.id, group.groupId, optionNum)
-      .catch(() => setSaveError('Kunde inte spara – kontrollera uppkopplingen och försök igen'))
+  function handleSelect(group, optionNum) {
+    setLocalSelections(p => ({ ...p, [group.groupId]: optionNum }))
+  }
+
+  async function handleSavePick(group) {
+    const selected = localSelections[group.groupId]
+    if (!selected || !user) return
+    setPickSaving(p => ({ ...p, [group.groupId]: true }))
+    try {
+      await saveBonusPick(user.id, group.groupId, selected)
+      setSavedPicks(p => ({ ...p, [group.groupId]: selected }))
+      setPickSuccess(p => ({ ...p, [group.groupId]: true }))
+      setTimeout(() => setPickSuccess(p => ({ ...p, [group.groupId]: false })), 2000)
+    } catch (err) {
+      setSaveError(`Kunde inte spara: ${err.message}`)
+    } finally {
+      setPickSaving(p => ({ ...p, [group.groupId]: false }))
+    }
   }
 
   async function handleAdminSave(group) {
@@ -114,8 +130,11 @@ export default function BonusPoang({ user, isAdmin }) {
       ) : (
         <div className="space-y-4">
           {groups.map(group => {
-            const userPick = picks[group.groupId]
-            const correct  = group.correctOption
+            const localSel  = localSelections[group.groupId]
+            const savedPick = savedPicks[group.groupId]
+            const correct   = group.correctOption
+            const isSaving  = pickSaving[group.groupId]
+            const isSuccess = pickSuccess[group.groupId]
 
             return (
               <div key={group.label}
@@ -136,10 +155,10 @@ export default function BonusPoang({ user, isAdmin }) {
                 {/* Options */}
                 <div className="p-3 space-y-2">
                   {group.options.map(opt => {
-                    const isSelected = userPick === opt.option_number
-                    const isCorrect  = correct === opt.option_number
-                    const isWrong    = isSelected && correct !== null && !isCorrect
-                    const isAnswered = correct !== null
+                    const isLocalSelected = localSel === opt.option_number
+                    const isSavedPick     = savedPick === opt.option_number
+                    const isCorrect       = correct === opt.option_number
+                    const isWrong         = isSavedPick && correct !== null && !isCorrect
 
                     let border    = '#334155'
                     let bg        = 'transparent'
@@ -147,17 +166,20 @@ export default function BonusPoang({ user, isAdmin }) {
                     let textColor = '#94A3B8'
                     let opacity   = 1
 
-                    if (isAnswered) {
+                    if (correct !== null) {
                       if (isCorrect) {
                         border = '#22C55E'; bg = 'rgba(34,197,94,0.08)'
                         numColor = '#4ADE80'; textColor = '#4ADE80'
                       } else if (isWrong) {
                         border = '#EF4444'; bg = 'rgba(239,68,68,0.08)'
                         numColor = '#F87171'; textColor = '#F87171'
+                      } else if (isLocalSelected) {
+                        border = '#F59E0B'
+                        numColor = '#F59E0B'; textColor = '#CBD5E1'
                       } else {
                         opacity = 0.35
                       }
-                    } else if (isSelected) {
+                    } else if (isLocalSelected) {
                       border = '#F59E0B'; bg = 'rgba(245,158,11,0.08)'
                       numColor = '#F59E0B'; textColor = '#F1F5F9'
                     }
@@ -165,13 +187,12 @@ export default function BonusPoang({ user, isAdmin }) {
                     return (
                       <button
                         key={opt.id}
-                        onClick={() => handlePick(group, opt.option_number)}
-                        disabled={!user || isAnswered}
+                        onClick={() => handleSelect(group, opt.option_number)}
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-all active:scale-[0.98]"
                         style={{
                           background: bg,
                           border:     `1.5px solid ${border}`,
-                          cursor:     (!user || isAnswered) ? 'default' : 'pointer',
+                          cursor:     'pointer',
                           opacity,
                         }}
                       >
@@ -182,13 +203,13 @@ export default function BonusPoang({ user, isAdmin }) {
                         <span className="text-sm flex-1" style={{ color: textColor }}>
                           {opt.option_text}
                         </span>
-                        {!isAnswered && isSelected && (
+                        {isLocalSelected && !isCorrect && !isWrong && (
                           <span className="text-base shrink-0" style={{ color: '#F59E0B' }}>●</span>
                         )}
-                        {isAnswered && isCorrect && (
+                        {isCorrect && (
                           <span className="text-base shrink-0 font-black" style={{ color: '#22C55E' }}>✓</span>
                         )}
-                        {isAnswered && isWrong && (
+                        {isWrong && (
                           <span className="text-base shrink-0 font-black" style={{ color: '#EF4444' }}>✗</span>
                         )}
                       </button>
@@ -196,19 +217,45 @@ export default function BonusPoang({ user, isAdmin }) {
                   })}
                 </div>
 
-                {/* Not-logged-in hint */}
-                {!user && (
-                  <div className="px-4 pb-3">
-                    <p className="text-xs" style={{ color: '#475569' }}>
-                      Logga in för att svara
+                {/* User save button */}
+                <div className="px-3 pb-3">
+                  {user ? (
+                    <button
+                      onClick={() => handleSavePick(group)}
+                      disabled={!localSel || isSaving}
+                      className="w-full py-2.5 rounded-xl text-sm font-bold transition-all active:scale-[0.98]"
+                      style={{
+                        background: isSuccess
+                          ? 'rgba(34,197,94,0.15)'
+                          : (!localSel || isSaving)
+                            ? '#1E293B'
+                            : 'linear-gradient(135deg,#F59E0B,#D97706)',
+                        color: isSuccess
+                          ? '#4ADE80'
+                          : (!localSel || isSaving)
+                            ? '#475569'
+                            : '#0F172A',
+                        border: (!localSel || isSaving) && !isSuccess
+                          ? '1px solid #334155'
+                          : isSuccess
+                            ? '1px solid #22C55E'
+                            : 'none',
+                        cursor: (!localSel || isSaving) ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {isSaving ? '⏳ Sparar...' : isSuccess ? '✓ Sparat!' : 'Spara mitt val'}
+                    </button>
+                  ) : (
+                    <p className="text-xs text-center" style={{ color: '#475569' }}>
+                      Logga in för att spara ditt svar
                     </p>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 {/* Admin controls */}
                 {isAdmin && (
                   <div className="px-3 pb-3 pt-1 flex items-center gap-2 flex-wrap"
-                       style={{ borderTop: '1px solid #1E293B' }}>
+                       style={{ borderTop: '1px solid #0F172A' }}>
                     <span className="text-xs font-semibold" style={{ color: '#64748B' }}>
                       Admin – rätt svar (1–4):
                     </span>
@@ -230,7 +277,7 @@ export default function BonusPoang({ user, isAdmin }) {
                         color:      adminSaving[group.label] ? '#64748B' : '#0F172A',
                       }}
                     >
-                      {adminSaving[group.label] ? '...' : 'Spara'}
+                      {adminSaving[group.label] ? '...' : 'Sätt rätt svar'}
                     </button>
                     {group.correctOption !== null && (
                       <span className="text-xs font-semibold" style={{ color: '#4ADE80' }}>
