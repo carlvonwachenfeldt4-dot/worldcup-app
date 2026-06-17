@@ -31,18 +31,28 @@ function BonusTab({ user }) {
   const [localPicks, setLocalPicks] = useState({})   // { bonus_question_id: chosen_option }
   const [loading,    setLoading]    = useState(true)
   const [saving,     setSaving]     = useState({})   // { bonus_question_id: bool }
-  const [success,    setSuccess]    = useState({})   // { bonus_question_id: bool }
   const [err,        setErr]        = useState(null)
+  const hasFetched = useRef(false)
 
   useEffect(() => {
+    if (!user?.id) {
+      setLocalPicks({})
+      setGroups([])
+      hasFetched.current = false
+      setLoading(false)
+      return
+    }
+    if (hasFetched.current) return   // already fetched for this user, do not overwrite localPicks
+    hasFetched.current = true
+
     async function load() {
       const [{ data: qs }, picksRes] = await Promise.all([
         supabase.from('bonus_questions')
           .select('id, match_label, option_number, option_text')
           .order('match_label').order('option_number'),
-        user?.id
-          ? supabase.from('bonus_picks').select('bonus_question_id, chosen_option').eq('user_id', user.id)
-          : Promise.resolve({ data: [] }),
+        supabase.from('bonus_picks')
+          .select('bonus_question_id, chosen_option')
+          .eq('user_id', user.id),
       ])
       const map = new Map()
       for (const q of qs ?? []) {
@@ -53,7 +63,6 @@ function BonusTab({ user }) {
         const sorted = [...opts].sort((a, b) => a.option_number - b.option_number)
         return { label, options: sorted, groupId: sorted[0].id }
       }))
-      // localPicks: bonus_question_id (= groupId = first option's UUID) → chosen_option
       const pm = {}
       for (const p of picksRes.data ?? []) pm[p.bonus_question_id] = p.chosen_option
       setLocalPicks(pm)
@@ -73,9 +82,7 @@ function BonusTab({ user }) {
     if (error) {
       setErr(error.message)
     } else {
-      setLocalPicks(p => ({ ...p, [groupId]: optionNum }))
-      setSuccess(p => ({ ...p, [groupId]: true }))
-      setTimeout(() => setSuccess(p => ({ ...p, [groupId]: false })), 2000)
+      setLocalPicks(prev => ({ ...prev, [groupId]: optionNum }))
     }
     setSaving(p => ({ ...p, [groupId]: false }))
   }
@@ -108,13 +115,11 @@ function BonusTab({ user }) {
       )}
 
       {groups.map(group => {
-        const saved = localPicks[group.groupId]
         return (
           <div key={group.label} style={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 16, overflow: 'hidden' }}>
-            <div style={{ background: '#0F172A', padding: '0.75rem 1rem', borderBottom: '1px solid #334155' }}>
+            <div style={{ background: '#0F172A', padding: '0.75rem 1rem', borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#F1F5F9' }}>{group.label}</span>
-              {success[group.groupId] && <span style={{ marginLeft: 8, fontSize: '0.75rem', color: '#4ADE80', fontWeight: 600 }}>✓ Sparat!</span>}
-              {saving[group.groupId]  && <span style={{ marginLeft: 8, fontSize: '0.75rem', color: '#94A3B8' }}>Sparar...</span>}
+              {saving[group.groupId] && <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Sparar...</span>}
             </div>
             <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
               {group.options.map(opt => {
@@ -137,7 +142,7 @@ function BonusTab({ user }) {
                     <span style={{ fontSize: '0.875rem', flex: 1, color: sel ? '#F1F5F9' : '#94A3B8' }}>
                       {opt.option_text}
                     </span>
-                    {sel && <span style={{ color: '#F59E0B', flexShrink: 0 }}>●</span>}
+                    {sel && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ADE80', flexShrink: 0 }}>✓ Valt</span>}
                   </button>
                 )
               })}
