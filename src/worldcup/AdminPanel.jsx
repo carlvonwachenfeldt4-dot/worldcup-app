@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, fetchMatchResults } from '../lib/supabase'
 
 export default function AdminPanel({ demo = false, user = null, profile = null }) {
@@ -14,6 +14,61 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
   const [syncing, setSyncing] = useState(false)
   const [matchResults, setMatchResults] = useState(null)
   const [diagLoading, setDiagLoading] = useState(false)
+
+  // ─── Manuella bonuspoäng ───────────────────────────────────────────────────
+  const [profiles, setProfiles] = useState([])
+  const [bonusUserId, setBonusUserId] = useState('')
+  const [bonusPoints, setBonusPoints] = useState(5)
+  const [bonusNote, setBonusNote] = useState('')
+  const [bonusLoading, setBonusLoading] = useState(false)
+  const [bonusMessage, setBonusMessage] = useState(null)
+  const [manualBonuses, setManualBonuses] = useState([])
+
+  useEffect(() => {
+    if (demo) return
+    supabase.from('profiles').select('id, username').order('username').then(({ data }) => {
+      if (data?.length) {
+        setProfiles(data)
+        setBonusUserId(data[0].id)
+      }
+    })
+    loadManualBonuses()
+  }, [demo])
+
+  async function loadManualBonuses() {
+    const { data } = await supabase
+      .from('manual_bonus_points')
+      .select('id, user_id, points, note, created_at, profiles(username)')
+      .order('created_at', { ascending: false })
+      .limit(30)
+    setManualBonuses(data ?? [])
+  }
+
+  async function addManualBonus() {
+    if (!bonusUserId) return setBonusMessage('Välj en användare')
+    const pts = parseInt(bonusPoints, 10)
+    if (!pts) return setBonusMessage('Ange giltigt poängtal')
+    setBonusLoading(true); setBonusMessage(null)
+    try {
+      const { error } = await supabase.from('manual_bonus_points').insert({
+        user_id: bonusUserId,
+        points: pts,
+        note: bonusNote.trim() || null,
+      })
+      if (error) throw error
+      setBonusMessage('✓ Bonuspoäng tillagda')
+      setBonusNote('')
+      setBonusPoints(5)
+      await loadManualBonuses()
+    } catch (e) {
+      setBonusMessage('Fel: ' + (e.message || e))
+    } finally { setBonusLoading(false) }
+  }
+
+  async function deleteManualBonus(id) {
+    const { error } = await supabase.from('manual_bonus_points').delete().eq('id', id)
+    if (!error) await loadManualBonuses()
+  }
 
   async function fetchResult() {
     if (!matchId) return setMessage('Ange match_id')
@@ -330,6 +385,98 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
           </div>
         )}
       </div>
+
+      {/* ─ Manuella bonuspoäng ─ */}
+      {!demo && (
+        <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
+          <p className="text-xs font-semibold mb-2" style={{ color:'#64748B' }}>MANUELLA BONUSPOÄNG</p>
+
+          <div className="space-y-2">
+            {/* Användare */}
+            <div className="flex gap-2 items-center">
+              <label className="text-xs w-20 shrink-0" style={{ color:'#94A3B8' }}>Användare</label>
+              <select
+                value={bonusUserId}
+                onChange={e => setBonusUserId(e.target.value)}
+                className="flex-1 rounded px-3 py-2 text-sm"
+                style={{ background:'#1E293B', color:'#F1F5F9', border:'1px solid #334155' }}
+              >
+                {profiles.map(p => (
+                  <option key={p.id} value={p.id}>{p.username}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Poäng */}
+            <div className="flex gap-2 items-center">
+              <label className="text-xs w-20 shrink-0" style={{ color:'#94A3B8' }}>Poäng</label>
+              <input
+                type="number"
+                value={bonusPoints}
+                onChange={e => setBonusPoints(e.target.value)}
+                className="w-24 rounded px-3 py-2 text-sm"
+                style={{ background:'#1E293B', color:'#F1F5F9', border:'1px solid #334155' }}
+              />
+            </div>
+
+            {/* Anledning */}
+            <div className="flex gap-2 items-center">
+              <label className="text-xs w-20 shrink-0" style={{ color:'#94A3B8' }}>Anledning</label>
+              <input
+                type="text"
+                value={bonusNote}
+                onChange={e => setBonusNote(e.target.value)}
+                placeholder="Valfri"
+                className="flex-1 rounded px-3 py-2 text-sm"
+                style={{ background:'#1E293B', color:'#F1F5F9', border:'1px solid #334155' }}
+              />
+            </div>
+
+            <button
+              onClick={addManualBonus}
+              disabled={bonusLoading}
+              className="px-4 py-2 rounded font-semibold text-sm"
+              style={{ background:'#6366F1', color:'#fff' }}
+            >
+              {bonusLoading ? 'Sparar...' : 'Lägg till poäng'}
+            </button>
+
+            {bonusMessage && (
+              <div className="text-xs mt-1" style={{ color: bonusMessage.startsWith('✓') ? '#34D399' : '#F87171' }}>
+                {bonusMessage}
+              </div>
+            )}
+          </div>
+
+          {/* Lista med senaste manuella bonuspoäng */}
+          {manualBonuses.length > 0 && (
+            <div className="mt-4 space-y-1">
+              <p className="text-xs font-semibold mb-2" style={{ color:'#64748B' }}>SENAST TILLAGDA</p>
+              {manualBonuses.map(b => (
+                <div
+                  key={b.id}
+                  className="flex items-center justify-between rounded px-3 py-2 text-xs gap-2"
+                  style={{ background:'#0F1E35', border:'1px solid #1E3A5F' }}
+                >
+                  <span style={{ color:'#93C5FD', minWidth: 80 }}>{b.profiles?.username ?? b.user_id}</span>
+                  <span className="font-bold" style={{ color:'#34D399', minWidth: 30 }}>+{b.points}p</span>
+                  <span className="flex-1 truncate" style={{ color:'#94A3B8' }}>{b.note ?? '—'}</span>
+                  <span style={{ color:'#475569' }}>
+                    {new Date(b.created_at).toLocaleDateString('sv-SE')}
+                  </span>
+                  <button
+                    onClick={() => deleteManualBonus(b.id)}
+                    className="px-2 py-0.5 rounded text-xs"
+                    style={{ background:'#450A0A', color:'#F87171' }}
+                  >
+                    Ta bort
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
