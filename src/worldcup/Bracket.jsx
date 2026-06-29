@@ -59,7 +59,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
     >
       {/* ─ Kollapsad rubrik ─ */}
       <button
-        onClick={() => !locked && onToggle(match.id)}
+        onClick={() => !locked && onToggle(match.match_id)}
         className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
         style={{
           background: expanded ? '#0F172A' : 'rgba(255,255,255,0.02)',
@@ -132,7 +132,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
       {/* ─ Expanderad del med 1X2-knappar (endast när ej låst) ─ */}
       {expanded && !locked && (
         <div className="px-3 pb-3 pt-1">
-          <TipButtons matchId={match.id} tip={tip} home={match.home_team} away={match.away_team} onTip={onTip} />
+          <TipButtons matchId={match.match_id} tip={tip} home={match.home_team} away={match.away_team} onTip={onTip} />
         </div>
       )}
     </div>
@@ -142,7 +142,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
 // ─── Rundsektion – matcher grupperade efter "round"-etiketten ───────────────
 
 function RoundSection({ round, matches, tips, onTip, openMatch, onToggle }) {
-  const filled = matches.filter(m => tips[m.id]).length
+  const filled = matches.filter(m => tips[m.match_id]).length
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background:'#1E293B', border:'1px solid #334155' }}>
@@ -162,11 +162,11 @@ function RoundSection({ round, matches, tips, onTip, openMatch, onToggle }) {
       <div className="p-2 space-y-1">
         {matches.map(m => (
           <MatchRow
-            key={m.id}
+            key={m.match_id}
             match={m}
-            tip={tips[m.id] ?? null}
+            tip={tips[m.match_id] ?? null}
             onTip={onTip}
-            expanded={openMatch === m.id}
+            expanded={openMatch === m.match_id}
             onToggle={onToggle}
           />
         ))}
@@ -208,7 +208,7 @@ export default function Bracket({ bracketTips, onTip }) {
 
   const toggle = useCallback(id => setOpenMatch(prev => prev === id ? null : id), [])
 
-  const filledCount = matches.filter(m => bracketTips[m.id]).length
+  const filledCount = matches.filter(m => bracketTips[m.match_id]).length
 
   // Gruppera i sort_order-ordning per "round"-etikett (eller en gemensam lista om ingen finns)
   const rounds = []
