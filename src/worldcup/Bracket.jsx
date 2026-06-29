@@ -11,12 +11,47 @@ function findTeamByName(name) {
   return Object.values(TEAMS).find(t => t.name.toLowerCase() === lower) ?? null
 }
 
+// Plockar isär t.ex. "Sverige (3:a C/D/F/G/H)" i huvudnamn + platshållarinfo,
+// så att huvudnamnet kan visas i fetstil och platshållarinfon på en egen,
+// mindre textrad istället för att klippas av med "…".
+function splitTeamLabel(name) {
+  if (!name) return { main: '', sub: null }
+  const m = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/)
+  if (m) return { main: m[1].trim(), sub: m[2].trim() }
+  return { main: name.trim(), sub: null }
+}
+
+// Neutral, medvetet designad platshållare för lag som ännu inte är fastställda
+// – ersätter den tomma flaggrutan som annars ser ut som ett laddningsfel.
+function PlaceholderFlag() {
+  return (
+    <span
+      className="inline-flex items-center justify-center shrink-0 rounded"
+      style={{
+        width: 20, height: 15,
+        background: '#1E293B',
+        border: '1px solid #334155',
+        color: '#64748B',
+        fontSize: 9,
+        fontWeight: 800,
+        lineHeight: 1,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
+      }}
+      aria-label="Lag ej fastställt"
+    >
+      ?
+    </span>
+  )
+}
+
 // ─── 1X2-knappar – identiska med gruppspelets TipButtons ─────────────────────
+// home/away ska vara de korta huvudnamnen (utan platshållarsuffix) så knapparna
+// blir jämnstora oavsett hur lång den fullständiga etiketten är.
 
 function TipButtons({ matchId, tip, home, away, onTip }) {
   const opts = [
     { val:'1', label: `1  ${home}` },
-    { val:'X', label: 'X  Oavgjort' },
+    { val:'X', label: 'X' },
     { val:'2', label: `${away}  2` },
   ]
   return (
@@ -42,9 +77,11 @@ function TipButtons({ matchId, tip, home, away, onTip }) {
 // ─── Enskild kollapsbar matchrad ──────────────────────────────────────────────
 
 function MatchRow({ match, tip, onTip, expanded, onToggle }) {
-  const homeTeam = findTeamByName(match.home_team)
-  const awayTeam = findTeamByName(match.away_team)
-  const locked   = match.status === 'finished'
+  const homeLabel = splitTeamLabel(match.home_team)
+  const awayLabel = splitTeamLabel(match.away_team)
+  const homeTeam  = findTeamByName(homeLabel.main)
+  const awayTeam  = findTeamByName(awayLabel.main)
+  const locked    = match.status === 'finished'
   const hasResult = locked && match.home_goals != null && match.away_goals != null
   const correct   = hasResult && tip && tip === match.result
 
@@ -54,7 +91,6 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
       style={{
         background: locked ? 'rgba(255,255,255,0.01)' : expanded ? '#0F172A' : 'transparent',
         border: `1px solid ${locked ? '#1E293B' : expanded ? '#334155' : 'transparent'}`,
-        opacity: locked && !tip ? 0.6 : 1,
       }}
     >
       {/* ─ Kollapsad rubrik ─ */}
@@ -66,29 +102,37 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
           cursor: locked ? 'default' : 'pointer',
         }}
       >
-        {/* Hemmalag */}
-        {homeTeam
-          ? <Flag iso2={homeTeam.iso2} size="sm" />
-          : <span className="w-5 h-3.5 rounded shrink-0 inline-block" style={{ background:'#334155' }} />
-        }
-        <span className="text-xs font-semibold truncate max-w-[64px] hidden sm:block"
-              style={{ color: locked ? '#64748B' : '#F1F5F9' }}>{match.home_team}</span>
-        <span className="text-xs font-semibold truncate max-w-[48px] sm:hidden"
-              style={{ color: locked ? '#64748B' : '#F1F5F9' }}>{match.home_team.slice(0,6)}</span>
+        {/* Hemmalag – fast bredd så att "vs" alltid hamnar i samma position */}
+        <div className="flex items-center gap-2 shrink-0 w-[108px] sm:w-[136px]">
+          {homeTeam ? <Flag iso2={homeTeam.iso2} size="sm" /> : <PlaceholderFlag />}
+          <div className="flex flex-col leading-tight min-w-0">
+            <span className="text-xs font-semibold" style={{ color:'#F1F5F9' }}>
+              {homeLabel.main}
+            </span>
+            {homeLabel.sub && (
+              <span className="text-[10px]" style={{ color:'#64748B' }} title={homeLabel.sub}>
+                {homeLabel.sub}
+              </span>
+            )}
+          </div>
+        </div>
 
-        <span className="text-xs mx-1" style={{ color:'#475569' }}>vs</span>
+        <span className="text-xs shrink-0" style={{ color:'#475569' }}>vs</span>
 
-        {/* Bortalag */}
-        {awayTeam
-          ? <Flag iso2={awayTeam.iso2} size="sm" />
-          : <span className="w-5 h-3.5 rounded shrink-0 inline-block" style={{ background:'#334155' }} />
-        }
-        <span className="text-xs font-semibold truncate max-w-[64px] hidden sm:block"
-              style={{ color: locked ? '#64748B' : '#F1F5F9' }}>{match.away_team}</span>
-        <span className="text-xs font-semibold truncate max-w-[48px] sm:hidden"
-              style={{ color: locked ? '#64748B' : '#F1F5F9' }}>{match.away_team.slice(0,6)}</span>
-
-        <div className="flex-1" />
+        {/* Bortalag – fyller resterande utrymme, trycker statusikoner till höger */}
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {awayTeam ? <Flag iso2={awayTeam.iso2} size="sm" /> : <PlaceholderFlag />}
+          <div className="flex flex-col leading-tight min-w-0">
+            <span className="text-xs font-semibold" style={{ color:'#F1F5F9' }}>
+              {awayLabel.main}
+            </span>
+            {awayLabel.sub && (
+              <span className="text-[10px]" style={{ color:'#64748B' }} title={awayLabel.sub}>
+                {awayLabel.sub}
+              </span>
+            )}
+          </div>
+        </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
           {/* Riktigt resultat när matchen är spelad */}
@@ -132,7 +176,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
       {/* ─ Expanderad del med 1X2-knappar (endast när ej låst) ─ */}
       {expanded && !locked && (
         <div className="px-3 pb-3 pt-1">
-          <TipButtons matchId={match.match_id} tip={tip} home={match.home_team} away={match.away_team} onTip={onTip} />
+          <TipButtons matchId={match.match_id} tip={tip} home={homeLabel.main} away={awayLabel.main} onTip={onTip} />
         </div>
       )}
     </div>
