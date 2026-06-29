@@ -5,7 +5,7 @@ import UserProfileModal from './UserProfileModal'
 
 function calcMyScore(groupTips, bracketTips) {
   return Object.values(groupTips).filter(Boolean).length * 3
-       + Object.values(bracketTips ?? {}).filter(Boolean).length * 2
+       + Object.values(bracketTips ?? {}).filter(Boolean).length * 3
 }
 
 const TIERS = [
@@ -67,7 +67,8 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
         .channel('leaderboard_changes')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'match_results' }, reload)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'group_tips' }, reload)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'bracket_picks' }, reload)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bracket_tips' }, reload)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'bracket_matches' }, reload)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'player_predictions' }, reload)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'vm_picks' }, reload)
         .subscribe(status => {
@@ -269,7 +270,7 @@ export default function Leaderboard({ groupTips, bracketTips, user }) {
                     <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 max-w-xs">
                       {[
                         ['🎯 Matchresultat (1X2)', u.match_pts,   '#34D399'],
-                        ['🏆 Bracket-picks',       u.bracket_pts, '#3B82F6'],
+                        ['🏆 Slutspel',            u.bracket_pts, '#3B82F6'],
                         ['⚽ Spelare',              u.player_pts,  '#F59E0B'],
                         ['🌟 VM-vinnare',           u.vm_pts,      '#F87171'],
                       ].map(([label, pts, color]) => (

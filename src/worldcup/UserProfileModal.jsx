@@ -87,7 +87,7 @@ export default function UserProfileModal({ profileUser, onClose }) {
           <div className="grid grid-cols-2 gap-2 mb-2">
             {[
               ['🎯 Matchresultat', profileUser.match_pts,   '#34D399'],
-              ['🏆 Bracket-picks', profileUser.bracket_pts, '#3B82F6'],
+              ['🏆 Slutspel',      profileUser.bracket_pts, '#3B82F6'],
               ['⚽ Spelare',        profileUser.player_pts,  '#F59E0B'],
               ['🌟 VM-vinnare',     profileUser.vm_pts,      '#F87171'],
             ].map(([label, pts, color]) => (

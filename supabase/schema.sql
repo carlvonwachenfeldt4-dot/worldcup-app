@@ -147,7 +147,7 @@ $$;
 -- ─── 6. Leaderboard-vy ───────────────────────────────────────────────────────
 -- Beräknar poäng per användare baserat på korrekta tips mot faktiska resultat.
 --   group_pts:   3p per korrekt 1X2-tips (tip = result i match_results), annars 0
---   bracket_pts: 2p per sparad bracket-pick (ingen resultatjämförelse ännu)
+--   bracket_pts: 3p per korrekt 1X2-tips på slutspelsmatcher, samma som group_pts
 --   total_pts:   summan av group_pts + bracket_pts
 
 CREATE OR REPLACE VIEW public.leaderboard_view AS
@@ -161,11 +161,11 @@ SELECT
   -- COALESCE hanterar användare som inte har några tips alls.
   COALESCE(gt.group_pts, 0)                             AS group_pts,
 
-  -- bracket_pts: tills vidare 2p per sparad pick (ingen facit-tabell ännu).
-  COALESCE(bp.pick_count, 0) * 2                        AS bracket_pts,
+  -- bracket_pts: samma poängmodell som grupptips, men mot bracket_matches.
+  COALESCE(bt.bracket_pts, 0)                           AS bracket_pts,
 
   -- total_pts: summan av de två ovanstående kolumnerna.
-  COALESCE(gt.group_pts, 0) + COALESCE(bp.pick_count, 0) * 2  AS total_pts
+  COALESCE(gt.group_pts, 0) + COALESCE(bt.bracket_pts, 0)  AS total_pts
 
 FROM public.profiles p
 
@@ -191,12 +191,16 @@ LEFT JOIN (
   GROUP BY gt.user_id
 ) gt ON gt.user_id = p.id
 
--- ── Subquery: räknar bracket-picks per användare ───────────────────────────
+-- ── Subquery: räknar ut slutspelspoäng per användare ───────────────────────
+-- Samma mönster som grupptips ovan, men mot bracket_matches/bracket_tips.
 LEFT JOIN (
-  SELECT user_id, COUNT(*) AS pick_count
-  FROM public.bracket_picks
-  GROUP BY user_id
-) bp ON bp.user_id = p.id
+  SELECT
+    bt.user_id,
+    SUM(CASE WHEN bm.result IS NOT NULL AND bt.tip = bm.result THEN 3 ELSE 0 END) AS bracket_pts
+  FROM public.bracket_tips bt
+  LEFT JOIN public.bracket_matches bm ON bt.match_id = bm.id
+  GROUP BY bt.user_id
+) bt ON bt.user_id = p.id
 
 ORDER BY total_pts DESC;
 
@@ -259,7 +263,8 @@ CREATE POLICY "Egna spelartips: update"     ON public.player_predictions FOR UPD
 CREATE OR REPLACE FUNCTION public.prevent_late_tips()
 RETURNS TRIGGER AS $$
 DECLARE
-  match_start TIMESTAMPTZ;
+  match_start  TIMESTAMPTZ;
+  match_status TEXT;
 BEGIN
   IF TG_TABLE_NAME = 'group_tips' THEN
     SELECT starts_at INTO match_start
@@ -272,6 +277,23 @@ BEGIN
 
     IF NOW() >= match_start THEN
       RAISE EXCEPTION 'Tippningen är stängd för match % – den har startat', NEW.match_id;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  -- Slutspelstips låses när admin sätter matchen som spelad (status = 'finished'),
+  -- inte via ett fast klockslag eftersom slutspelets tider beror på gruppspelsresultat.
+  IF TG_TABLE_NAME = 'bracket_tips' THEN
+    SELECT status INTO match_status
+      FROM public.bracket_matches
+     WHERE id = NEW.match_id;
+
+    IF match_status IS NULL THEN
+      RAISE EXCEPTION 'Okänd slutspelsmatch %', NEW.match_id;
+    END IF;
+
+    IF match_status = 'finished' THEN
+      RAISE EXCEPTION 'Tippningen är stängd – matchen är redan spelad';
     END IF;
     RETURN NEW;
   END IF;
@@ -293,6 +315,11 @@ CREATE TRIGGER check_tip_time
 DROP TRIGGER IF EXISTS check_tip_time ON public.bracket_picks;
 CREATE TRIGGER check_tip_time
   BEFORE INSERT OR UPDATE ON public.bracket_picks
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_late_tips();
+
+DROP TRIGGER IF EXISTS check_tip_time ON public.bracket_tips;
+CREATE TRIGGER check_tip_time
+  BEFORE INSERT OR UPDATE ON public.bracket_tips
   FOR EACH ROW EXECUTE FUNCTION public.prevent_late_tips();
 
 DROP TRIGGER IF EXISTS check_tip_time ON public.player_predictions;
@@ -515,7 +542,89 @@ CREATE POLICY "Tournament admin upsert" ON public.tournament_results FOR UPDATE 
 );
 
 -- ───────────────────────────────────────────────────────────────────────────
--- Ny, utökad leaderboard som inkluderar matchpoäng (3p), bracket-picks (2p),
+-- Slutspel 2.0: bracket_matches + bracket_tips.
+-- Slutspelsfliken fungerar nu exakt som grupptipset – riktiga lagnamn hämtas
+-- från bracket_matches (satta av admin när de är klara) och användarna tippar
+-- 1X2 precis som på gruppspelsmatcher. Den gamla "gissa lag till slot"-tabellen
+-- (bracket_picks) används inte längre av klienten men behålls i databasen.
+-- ───────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.bracket_matches (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  sort_order  INT NOT NULL,                          -- visningsordning i fliken
+  round       TEXT,                                  -- t.ex. "Åttondelsfinal", "Final"
+  home_team   TEXT NOT NULL,
+  away_team   TEXT NOT NULL,
+  starts_at   TIMESTAMPTZ,
+  status      TEXT NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','live','finished')),
+  home_goals  INT,
+  away_goals  INT,
+  result      TEXT GENERATED ALWAYS AS (
+                 CASE
+                   WHEN home_goals IS NULL OR away_goals IS NULL THEN NULL
+                   WHEN home_goals > away_goals THEN '1'
+                   WHEN home_goals < away_goals THEN '2'
+                   ELSE 'X' END) STORED,
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bracket_matches_sort_order ON public.bracket_matches (sort_order);
+
+ALTER TABLE public.bracket_matches ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Bracket-matcher select" ON public.bracket_matches;
+DROP POLICY IF EXISTS "Bracket-matcher admin write" ON public.bracket_matches;
+DROP POLICY IF EXISTS "Bracket-matcher admin update" ON public.bracket_matches;
+CREATE POLICY "Bracket-matcher select" ON public.bracket_matches FOR SELECT USING (true);
+CREATE POLICY "Bracket-matcher admin write" ON public.bracket_matches FOR INSERT WITH CHECK (
+  (SELECT coalesce(is_admin, false) FROM public.profiles WHERE id = auth.uid()) = true
+);
+CREATE POLICY "Bracket-matcher admin update" ON public.bracket_matches FOR UPDATE USING (
+  (SELECT coalesce(is_admin, false) FROM public.profiles WHERE id = auth.uid()) = true
+);
+
+CREATE TABLE IF NOT EXISTS public.bracket_tips (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  match_id    UUID NOT NULL REFERENCES public.bracket_matches(id) ON DELETE CASCADE,
+  tip         TEXT NOT NULL CHECK (tip IN ('1','X','2')),
+  updated_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, match_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bracket_tips_user_id ON public.bracket_tips (user_id);
+CREATE INDEX IF NOT EXISTS idx_bracket_tips_match_id ON public.bracket_tips (match_id);
+
+ALTER TABLE public.bracket_tips ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Egna bracket-tips: select" ON public.bracket_tips;
+DROP POLICY IF EXISTS "Egna bracket-tips: insert" ON public.bracket_tips;
+DROP POLICY IF EXISTS "Egna bracket-tips: update" ON public.bracket_tips;
+DROP POLICY IF EXISTS "Egna bracket-tips: delete" ON public.bracket_tips;
+CREATE POLICY "Egna bracket-tips: select" ON public.bracket_tips FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Egna bracket-tips: insert" ON public.bracket_tips FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Egna bracket-tips: update" ON public.bracket_tips FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "Egna bracket-tips: delete" ON public.bracket_tips FOR DELETE USING (auth.uid() = user_id);
+
+-- Server-side konfliktkontroll, samma mönster som safe_save_group_tip.
+CREATE OR REPLACE FUNCTION public.safe_save_bracket_tip(
+  p_user_id UUID,
+  p_match_id UUID,
+  p_tip TEXT
+)
+RETURNS SETOF public.bracket_tips
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN QUERY
+  INSERT INTO public.bracket_tips (user_id, match_id, tip, updated_at)
+  VALUES (p_user_id, p_match_id, p_tip, NOW())
+  ON CONFLICT (user_id, match_id)
+  DO UPDATE SET tip = EXCLUDED.tip, updated_at = NOW()
+  RETURNING *;
+END;
+$$;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Ny, utökad leaderboard som inkluderar matchpoäng (3p), slutspelspoäng (3p),
 -- spelarpoäng (scorer/assist/gula/röda) och VM-vinnare (20p).
 -- Den här vyn förutsätter att `match_results`, `player_stats` och `vm_picks`
 -- är synkade av servern.
@@ -539,7 +648,11 @@ LEFT JOIN (
   GROUP BY gt.user_id
 ) m ON m.user_id = p.id
 LEFT JOIN (
-  SELECT user_id, COUNT(team_id) * 2 AS bracket_pts FROM public.bracket_picks GROUP BY user_id
+  SELECT bt.user_id,
+         SUM(CASE WHEN bt.tip IS NOT NULL AND bm.result IS NOT NULL AND bt.tip = bm.result THEN 3 ELSE 0 END) AS bracket_pts
+  FROM public.bracket_tips bt
+  LEFT JOIN public.bracket_matches bm ON bt.match_id = bm.id
+  GROUP BY bt.user_id
 ) b ON b.user_id = p.id
 LEFT JOIN (
   SELECT pp.user_id,
@@ -563,7 +676,7 @@ LEFT JOIN (
 ) v ON v.user_id = p.id
 WHERE (
   EXISTS (SELECT 1 FROM public.group_tips gt WHERE gt.user_id = p.id)
-  OR EXISTS (SELECT 1 FROM public.bracket_picks bp WHERE bp.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.bracket_tips bt WHERE bt.user_id = p.id)
   OR EXISTS (SELECT 1 FROM public.player_predictions pp WHERE pp.user_id = p.id)
   OR EXISTS (SELECT 1 FROM public.vm_picks vp WHERE vp.user_id = p.id)
 )
@@ -599,7 +712,11 @@ LEFT JOIN (
   GROUP BY gt.user_id
 ) m ON m.user_id = p.id
 LEFT JOIN (
-  SELECT user_id, COUNT(team_id) * 2 AS bracket_pts FROM public.bracket_picks GROUP BY user_id
+  SELECT bt.user_id,
+         SUM(CASE WHEN bt.tip IS NOT NULL AND bm.result IS NOT NULL AND bt.tip = bm.result THEN 3 ELSE 0 END) AS bracket_pts
+  FROM public.bracket_tips bt
+  LEFT JOIN public.bracket_matches bm ON bt.match_id = bm.id
+  GROUP BY bt.user_id
 ) b ON b.user_id = p.id
 LEFT JOIN (
   SELECT pp.user_id,
@@ -623,7 +740,7 @@ LEFT JOIN (
 ) v ON v.user_id = p.id
 WHERE (
   EXISTS (SELECT 1 FROM public.group_tips gt WHERE gt.user_id = p.id)
-  OR EXISTS (SELECT 1 FROM public.bracket_picks bp WHERE bp.user_id = p.id)
+  OR EXISTS (SELECT 1 FROM public.bracket_tips bt WHERE bt.user_id = p.id)
   OR EXISTS (SELECT 1 FROM public.player_predictions pp WHERE pp.user_id = p.id)
   OR EXISTS (SELECT 1 FROM public.vm_picks vp WHERE vp.user_id = p.id)
 )

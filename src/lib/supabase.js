@@ -79,26 +79,46 @@ export async function saveGroupTip(userId, matchId, tip) {
   }
 }
 
-// Ladda bracket-picks
-export async function loadBracketPicks(userId) {
+// Hämta alla slutspelsmatcher, sorterat på visningsordning.
+export async function fetchBracketMatches() {
   const { data, error } = await supabase
-    .from('bracket_picks')
-    .select('slot_id, team_id')
-    .eq('user_id', userId)
+    .from('bracket_matches')
+    .select('id, sort_order, round, home_team, away_team, status, home_goals, away_goals, result')
+    .order('sort_order')
   if (error) throw error
-  return Object.fromEntries(data.map(r => [r.slot_id, r.team_id]))
+  return data ?? []
 }
 
-// Spara bracket-pick via server-side konfliktkontroll.
-export async function saveBracketPick(userId, slotId, teamId) {
-  const { data, error } = await supabase.rpc('safe_save_bracket_pick', {
+// Läs in alla slutspelstips för inloggad användare
+export async function loadBracketTips(userId) {
+  const { data, error } = await supabase
+    .from('bracket_tips')
+    .select('match_id, tip')
+    .eq('user_id', userId)
+  if (error) throw error
+  return Object.fromEntries(data.map(r => [r.match_id, r.tip]))
+}
+
+// Ta bort ett slutspelstips
+export async function deleteBracketTip(userId, matchId) {
+  const { error } = await supabase
+    .from('bracket_tips')
+    .delete()
+    .eq('user_id', userId)
+    .eq('match_id', matchId)
+  if (error) throw error
+}
+
+// Spara ett slutspelstips via server-side konfliktkontroll.
+export async function saveBracketTip(userId, matchId, tip) {
+  const { data, error } = await supabase.rpc('safe_save_bracket_tip', {
     p_user_id: userId,
-    p_slot_id: slotId,
-    p_team_id: teamId,
+    p_match_id: matchId,
+    p_tip: tip,
   })
   if (error) throw error
   if (!data || data.length === 0) {
-    throw new Error('Uppdatering av bracket-pick avvisades eftersom en nyare ändring redan sparats.')
+    throw new Error('Uppdatering av slutspelstipset avvisades eftersom en nyare ändring redan sparats.')
   }
 }
 

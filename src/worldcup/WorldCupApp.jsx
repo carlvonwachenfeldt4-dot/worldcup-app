@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TOTAL_MATCHES } from './data'
 import { supabase, signOut, loadGroupTips, saveGroupTip, deleteGroupTip,
-         loadBracketPicks, saveBracketPick, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, loadVmWinnerPick } from '../lib/supabase'
+         loadBracketTips, saveBracketTip, deleteBracketTip, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, loadVmWinnerPick } from '../lib/supabase'
 import BonusTab          from './BonusTab'
 import GroupStage        from './GroupStage'
 import Bracket           from './Bracket'
@@ -67,6 +67,7 @@ export default function WorldCupApp() {
   const [syncing,           setSyncing]           = useState(false)
   const menuRef = useRef(null)
   const tipDebounce = useRef({})
+  const bracketTipDebounce = useRef({})
 
   // ─── Auth: lyssna på session-förändringar ────────────────────────────────
   useEffect(() => {
@@ -189,7 +190,7 @@ export default function WorldCupApp() {
     try {
       const [dbTips, dbBracket, dbPredictions, dbVmWinner] = await Promise.all([
         loadGroupTips(userId),
-        loadBracketPicks(userId),
+        loadBracketTips(userId),
         loadPlayerPredictions(userId),
         loadVmWinnerPick(userId),
       ])
@@ -226,8 +227,13 @@ export default function WorldCupApp() {
   const handleBracketTip = useCallback((matchId, val) => {
     setBracketTips(prev => ({ ...prev, [matchId]: val }))
     if (user) {
-      saveBracketPick(user.id, matchId, val)
-        .catch(() => setSaveError('Tipset kunde inte sparas – kontrollera uppkopplingen och försök igen.'))
+      clearTimeout(bracketTipDebounce.current[matchId])
+      bracketTipDebounce.current[matchId] = setTimeout(() => {
+        const op = val
+          ? saveBracketTip(user.id, matchId, val)
+          : deleteBracketTip(user.id, matchId)
+        op.catch(() => setSaveError('Tipset kunde inte sparas – kontrollera uppkopplingen och försök igen.'))
+      }, 600)
     }
   }, [user])
 
@@ -568,10 +574,8 @@ export default function WorldCupApp() {
         {tab === 'bracket' && (
           <ErrorBoundary>
             <Bracket
-              groupTips={tips}
               bracketTips={bracketTips}
               onTip={handleBracketTip}
-              onEditGroups={() => setTab('groups')}
             />
           </ErrorBoundary>
         )}

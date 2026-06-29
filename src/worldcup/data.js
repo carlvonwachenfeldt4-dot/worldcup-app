@@ -195,67 +195,6 @@ export function getQualifiers(tips) {
   return { firsts, seconds, wildcards: thirds.slice(0,8), thirds }
 }
 
-// ─── Knockout-schema med datum (CEST = UTC+2) ─────────────────────────────────
-// Lag (t1/t2) sätts antingen via API-Football eller härledda från grupptips.
-// seed1/seed2 = visas som fallback när lag ännu inte är kända.
-
-export const KNOCKOUT_ROUNDS = [
-  {
-    id: 'R32', label: 'Omgång 32', matches: [
-      {id:'R32-1',  dt:'2026-06-29T21:00', seed1:'1A',    seed2:'2B',    t1:null, t2:null},
-      {id:'R32-2',  dt:'2026-06-29T21:00', seed1:'1C',    seed2:'2D',    t1:null, t2:null},
-      {id:'R32-3',  dt:'2026-06-30T18:00', seed1:'1E',    seed2:'2F',    t1:null, t2:null},
-      {id:'R32-4',  dt:'2026-06-30T21:00', seed1:'1G',    seed2:'2H',    t1:null, t2:null},
-      {id:'R32-5',  dt:'2026-07-01T18:00', seed1:'1I',    seed2:'2J',    t1:null, t2:null},
-      {id:'R32-6',  dt:'2026-07-01T21:00', seed1:'1K',    seed2:'2L',    t1:null, t2:null},
-      {id:'R32-7',  dt:'2026-07-02T18:00', seed1:'3:a #1',seed2:'3:a #8',t1:null, t2:null},
-      {id:'R32-8',  dt:'2026-07-02T21:00', seed1:'3:a #2',seed2:'3:a #7',t1:null, t2:null},
-      {id:'R32-9',  dt:'2026-07-03T18:00', seed1:'1B',    seed2:'2A',    t1:null, t2:null},
-      {id:'R32-10', dt:'2026-07-03T21:00', seed1:'1D',    seed2:'2C',    t1:null, t2:null},
-      {id:'R32-11', dt:'2026-07-04T18:00', seed1:'1F',    seed2:'2E',    t1:null, t2:null},
-      {id:'R32-12', dt:'2026-07-04T21:00', seed1:'1H',    seed2:'2G',    t1:null, t2:null},
-      {id:'R32-13', dt:'2026-07-05T18:00', seed1:'1J',    seed2:'2I',    t1:null, t2:null},
-      {id:'R32-14', dt:'2026-07-05T21:00', seed1:'1L',    seed2:'2K',    t1:null, t2:null},
-      {id:'R32-15', dt:'2026-07-06T18:00', seed1:'3:a #3',seed2:'3:a #6',t1:null, t2:null},
-      {id:'R32-16', dt:'2026-07-06T21:00', seed1:'3:a #4',seed2:'3:a #5',t1:null, t2:null},
-    ],
-  },
-  {
-    id: 'R16', label: 'Omgång 16', matches: [
-      {id:'R16-1', dt:'2026-07-09T21:00', seed1:'V R32-1', seed2:'V R32-2', t1:null, t2:null},
-      {id:'R16-2', dt:'2026-07-10T18:00', seed1:'V R32-3', seed2:'V R32-4', t1:null, t2:null},
-      {id:'R16-3', dt:'2026-07-10T21:00', seed1:'V R32-5', seed2:'V R32-6', t1:null, t2:null},
-      {id:'R16-4', dt:'2026-07-11T18:00', seed1:'V R32-7', seed2:'V R32-8', t1:null, t2:null},
-      {id:'R16-5', dt:'2026-07-11T21:00', seed1:'V R32-9', seed2:'V R32-10',t1:null, t2:null},
-      {id:'R16-6', dt:'2026-07-12T18:00', seed1:'V R32-11',seed2:'V R32-12',t1:null, t2:null},
-      {id:'R16-7', dt:'2026-07-12T21:00', seed1:'V R32-13',seed2:'V R32-14',t1:null, t2:null},
-      {id:'R16-8', dt:'2026-07-13T18:00', seed1:'V R32-15',seed2:'V R32-16',t1:null, t2:null},
-    ],
-  },
-  {
-    id: 'QF', label: 'Kvartsfinal', matches: [
-      {id:'QF-1', dt:'2026-07-16T21:00', seed1:'V R16-1', seed2:'V R16-2', t1:null, t2:null},
-      {id:'QF-2', dt:'2026-07-17T18:00', seed1:'V R16-3', seed2:'V R16-4', t1:null, t2:null},
-      {id:'QF-3', dt:'2026-07-17T21:00', seed1:'V R16-5', seed2:'V R16-6', t1:null, t2:null},
-      {id:'QF-4', dt:'2026-07-18T18:00', seed1:'V R16-7', seed2:'V R16-8', t1:null, t2:null},
-    ],
-  },
-  {
-    id: 'SF', label: 'Semifinal', matches: [
-      {id:'SF-1', dt:'2026-07-21T21:00', seed1:'V QF-1', seed2:'V QF-2', t1:null, t2:null},
-      {id:'SF-2', dt:'2026-07-22T21:00', seed1:'V QF-3', seed2:'V QF-4', t1:null, t2:null},
-    ],
-  },
-  {
-    id: 'F', label: 'Final', matches: [
-      {id:'F', dt:'2026-07-26T21:00', seed1:'V SF-1', seed2:'V SF-2', t1:null, t2:null},
-    ],
-  },
-]
-
-// Alla knockout-match-ID:n, platta
-export const ALL_KNOCKOUT_IDS = KNOCKOUT_ROUNDS.flatMap(r => r.matches.map(m => m.id))
-
 
 // ─── Mock världsranking ───────────────────────────────────────────────────────
 

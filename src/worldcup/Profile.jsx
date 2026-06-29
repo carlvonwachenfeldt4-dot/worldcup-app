@@ -134,13 +134,11 @@ export default function Profile({ user, onBack, onSignOut, profile: profileProp,
               <div className="mt-2">
                 <h4 className="font-semibold" style={{ color:'#F1F5F9' }}>Slutspel</h4>
                 {Object.keys(bracketTips ?? {}).length === 0 ? (
-                  <p className="text-xs" style={{ color:'#64748B' }}>Inga bracket-picks</p>
+                  <p className="text-xs" style={{ color:'#64748B' }}>Inga slutspelstips</p>
                 ) : (
-                  <ul className="mt-2 space-y-1">
-                    {Object.entries(bracketTips ?? {}).map(([slot, team]) => (
-                      <li key={slot} style={{ color:'#F1F5F9' }}>{slot}: {team}</li>
-                    ))}
-                  </ul>
+                  <p className="text-xs mt-2" style={{ color:'#94A3B8' }}>
+                    {Object.values(bracketTips ?? {}).filter(Boolean).length} slutspelstips sparade
+                  </p>
                 )}
               </div>
 
