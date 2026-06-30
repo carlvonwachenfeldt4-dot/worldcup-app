@@ -83,7 +83,7 @@ export async function saveGroupTip(userId, matchId, tip) {
 export async function fetchBracketMatches() {
   const { data, error } = await supabase
     .from('bracket_matches')
-    .select('match_id, sort_order, round, home_team, away_team, status, home_goals, away_goals, result')
+    .select('match_id, sort_order, round, home_team, away_team, kickoff, status, home_goals, away_goals, result')
     .order('sort_order')
   if (error) throw error
   return data ?? []

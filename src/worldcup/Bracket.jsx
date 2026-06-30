@@ -76,14 +76,18 @@ function TipButtons({ matchId, tip, home, away, onTip }) {
 
 // ─── Enskild kollapsbar matchrad ──────────────────────────────────────────────
 
-function MatchRow({ match, tip, onTip, expanded, onToggle }) {
-  const homeLabel = splitTeamLabel(match.home_team)
-  const awayLabel = splitTeamLabel(match.away_team)
-  const homeTeam  = findTeamByName(homeLabel.main)
-  const awayTeam  = findTeamByName(awayLabel.main)
-  const locked    = match.status === 'finished'
-  const hasResult = locked && match.home_goals != null && match.away_goals != null
-  const correct   = hasResult && tip && tip === match.result
+function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
+  const homeLabel  = splitTeamLabel(match.home_team)
+  const awayLabel  = splitTeamLabel(match.away_team)
+  const homeTeam   = findTeamByName(homeLabel.main)
+  const awayTeam   = findTeamByName(awayLabel.main)
+  const finished   = match.status === 'finished'
+  // Lås också vid kickoff-tid så knapparna aldrig är klickbara efter start,
+  // även om admin ännu inte satt status till 'finished'.
+  const kickedOff  = match.kickoff ? now >= new Date(match.kickoff) : false
+  const locked     = finished || kickedOff
+  const hasResult  = finished && match.home_goals != null && match.away_goals != null
+  const correct    = hasResult && tip && tip === match.result
 
   return (
     <div
@@ -185,7 +189,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle }) {
 
 // ─── Rundsektion – matcher grupperade efter "round"-etiketten ───────────────
 
-function RoundSection({ round, matches, tips, onTip, openMatch, onToggle }) {
+function RoundSection({ round, matches, tips, onTip, openMatch, onToggle, now }) {
   const filled = matches.filter(m => tips[m.match_id]).length
 
   return (
@@ -212,6 +216,7 @@ function RoundSection({ round, matches, tips, onTip, openMatch, onToggle }) {
             onTip={onTip}
             expanded={openMatch === m.match_id}
             onToggle={onToggle}
+            now={now}
           />
         ))}
       </div>
@@ -222,10 +227,17 @@ function RoundSection({ round, matches, tips, onTip, openMatch, onToggle }) {
 // ─── Huvudkomponent: Bracket (Slutspel) ───────────────────────────────────────
 
 export default function Bracket({ bracketTips, onTip }) {
-  const [matches, setMatches] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState(null)
+  const [matches,   setMatches]   = useState([])
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
   const [openMatch, setOpenMatch] = useState(null)
+  // Klocka som tickar var 30:e sekund – samma mönster som GroupStage – så att
+  // MatchRow automatiskt låses när kickoff-tiden passerar utan omladdning.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   const load = useCallback(async () => {
     try {
@@ -313,6 +325,7 @@ export default function Bracket({ bracketTips, onTip }) {
               onTip={onTip}
               openMatch={openMatch}
               onToggle={toggle}
+              now={now}
             />
           ))}
         </>
