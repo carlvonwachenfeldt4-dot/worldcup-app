@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, fetchMatchResults } from '../lib/supabase'
+import { supabase, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, fetchMatchResults, fetchBracketMatches } from '../lib/supabase'
 
 export default function AdminPanel({ demo = false, user = null, profile = null }) {
   const [matchId, setMatchId] = useState('')
@@ -14,6 +14,11 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
   const [syncing, setSyncing] = useState(false)
   const [matchResults, setMatchResults] = useState(null)
   const [diagLoading, setDiagLoading] = useState(false)
+
+  // ─── Slutspelsresultat ────────────────────────────────────────────────────
+  const [bracketMatches, setBracketMatches] = useState([])
+  // { [match_id]: { home: string, away: string, saving: bool, msg: string|null } }
+  const [bracketGoals, setBracketGoals] = useState({})
 
   // ─── Manuella bonuspoäng ───────────────────────────────────────────────────
   const [profiles, setProfiles] = useState([])
@@ -33,6 +38,14 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
       }
     })
     loadManualBonuses()
+    fetchBracketMatches().then(data => {
+      setBracketMatches(data)
+      const init = {}
+      for (const m of data) {
+        init[m.match_id] = { home: m.home_goals ?? '', away: m.away_goals ?? '', saving: false, msg: null }
+      }
+      setBracketGoals(init)
+    }).catch(() => {})
   }, [demo])
 
   async function loadManualBonuses() {
@@ -160,6 +173,33 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
     try {
       await reloadDiag()
     } finally { setDiagLoading(false) }
+  }
+
+  function updateBracketGoal(matchId, patch) {
+    setBracketGoals(prev => ({ ...prev, [matchId]: { ...prev[matchId], ...patch } }))
+  }
+
+  async function saveBracketResult(matchId) {
+    const g = bracketGoals[matchId] ?? {}
+    const homeG = parseInt(g.home, 10)
+    const awayG = parseInt(g.away, 10)
+    if (isNaN(homeG) || isNaN(awayG) || homeG < 0 || awayG < 0) {
+      return updateBracketGoal(matchId, { msg: '⚠ Ange giltiga mål (0 eller mer)' })
+    }
+    updateBracketGoal(matchId, { saving: true, msg: null })
+    const { error } = await supabase
+      .from('bracket_matches')
+      .update({ home_goals: homeG, away_goals: awayG, status: 'finished', updated_at: new Date().toISOString() })
+      .eq('match_id', matchId)
+    if (error) {
+      updateBracketGoal(matchId, { saving: false, msg: '⚠ ' + error.message })
+    } else {
+      updateBracketGoal(matchId, { saving: false, msg: '✓ Sparat!' })
+      setBracketMatches(prev => prev.map(m =>
+        m.match_id === matchId ? { ...m, home_goals: homeG, away_goals: awayG, status: 'finished' } : m
+      ))
+      setTimeout(() => updateBracketGoal(matchId, { msg: null }), 3000)
+    }
   }
 
   async function runApiSync() {
@@ -358,6 +398,92 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
           {message && <div className="text-xs mt-2" style={{ color: message.startsWith('Sparat') || message.startsWith('Pushed') || message.startsWith('Hämtat') ? '#34D399' : '#F87171' }}>{message}</div>}
         </div>
       </div>
+
+      {/* ─ Slutspelsresultat ─ */}
+      {!demo && (
+        <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
+          <p className="text-xs font-semibold mb-3" style={{ color:'#64748B' }}>
+            SLUTSPELSRESULTAT — bracket_matches
+          </p>
+
+          {bracketMatches.length === 0 && (
+            <p className="text-xs" style={{ color:'#475569' }}>
+              Inga slutspelsmatcher inlagda i bracket_matches ännu.
+            </p>
+          )}
+
+          <div className="space-y-2">
+            {bracketMatches.map(m => {
+              const g   = bracketGoals[m.match_id] ?? { home:'', away:'', saving:false, msg:null }
+              const num = m.match_number != null ? `#${m.match_number}` : null
+              const alreadyDone = m.status === 'finished' && m.home_goals != null
+              return (
+                <div key={m.match_id}
+                     className="rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2"
+                     style={{ background:'#0F1E35', border:`1px solid ${alreadyDone ? 'rgba(52,211,153,0.25)' : '#1E3A5F'}` }}>
+
+                  {/* Match-nummer */}
+                  {num && (
+                    <span className="text-xs font-black shrink-0 w-8 text-center rounded"
+                          style={{ background:'rgba(245,158,11,0.12)', color:'#F59E0B' }}>
+                      {num}
+                    </span>
+                  )}
+
+                  {/* Lagnamn */}
+                  <span className="text-xs font-semibold flex-1 min-w-[140px]"
+                        style={{ color:'#F1F5F9' }}>
+                    {m.home_team} <span style={{ color:'#475569' }}>vs</span> {m.away_team}
+                  </span>
+
+                  {/* Befintligt resultat */}
+                  {alreadyDone && (
+                    <span className="text-xs px-1.5 py-0.5 rounded font-mono shrink-0"
+                          style={{ background:'rgba(52,211,153,0.12)', color:'#34D399' }}>
+                      {m.home_goals}–{m.away_goals}
+                    </span>
+                  )}
+
+                  {/* Mål-inputs */}
+                  <input
+                    type="number" min="0" value={g.home}
+                    onChange={e => updateBracketGoal(m.match_id, { home: e.target.value })}
+                    placeholder="H" aria-label="Hemmamål"
+                    className="w-14 rounded px-2 py-1 text-sm text-center"
+                    style={{ background:'#1E293B', color:'#F1F5F9', border:'1px solid #334155' }}
+                  />
+                  <span className="text-xs" style={{ color:'#475569' }}>–</span>
+                  <input
+                    type="number" min="0" value={g.away}
+                    onChange={e => updateBracketGoal(m.match_id, { away: e.target.value })}
+                    placeholder="B" aria-label="Bortamål"
+                    className="w-14 rounded px-2 py-1 text-sm text-center"
+                    style={{ background:'#1E293B', color:'#F1F5F9', border:'1px solid #334155' }}
+                  />
+
+                  {/* Spara-knapp */}
+                  <button
+                    onClick={() => saveBracketResult(m.match_id)}
+                    disabled={g.saving}
+                    className="px-3 py-1.5 rounded font-semibold text-xs shrink-0"
+                    style={{ background: g.saving ? '#334155' : '#F59E0B', color: g.saving ? '#64748B' : '#0F172A' }}
+                  >
+                    {g.saving ? 'Sparar...' : 'Spara'}
+                  </button>
+
+                  {/* Feedback */}
+                  {g.msg && (
+                    <span className="text-xs shrink-0"
+                          style={{ color: g.msg.startsWith('✓') ? '#34D399' : '#F87171' }}>
+                      {g.msg}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ─ VM-vinnare ─ */}
       <div className="rounded-xl p-3" style={{ background:'#0F172A', border:'1px solid #1E3A5F' }}>
