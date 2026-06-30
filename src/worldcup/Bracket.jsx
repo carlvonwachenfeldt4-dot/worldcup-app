@@ -132,11 +132,6 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
             <span className="text-xs font-semibold" style={{ color:'#F1F5F9' }}>
               {homeLabel.main}
             </span>
-            {homeLabel.sub && (
-              <span className="text-[10px]" style={{ color:'#64748B' }} title={homeLabel.sub}>
-                {homeLabel.sub}
-              </span>
-            )}
           </div>
         </div>
 
@@ -149,11 +144,6 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
             <span className="text-xs font-semibold" style={{ color:'#F1F5F9' }}>
               {awayLabel.main}
             </span>
-            {awayLabel.sub && (
-              <span className="text-[10px]" style={{ color:'#64748B' }} title={awayLabel.sub}>
-                {awayLabel.sub}
-              </span>
-            )}
           </div>
         </div>
 
