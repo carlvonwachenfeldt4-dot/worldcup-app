@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { TEAMS } from './data'
 import Flag from './Flag'
 import { supabase, fetchBracketMatches } from '../lib/supabase'
+import { getCountdown, isMatchSoon } from '../lib/scoreCalculator'
 
 // ─── Slå upp flagg-iso2 för ett lagnamn (matchar mot TEAMS i data.js) ────────
 
@@ -19,6 +20,21 @@ function splitTeamLabel(name) {
   const m = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/)
   if (m) return { main: m[1].trim(), sub: m[2].trim() }
   return { main: name.trim(), sub: null }
+}
+
+// Formaterar en ISO-timestamp till svensk local tid, t.ex. "tis 30 jun, 23:00".
+// Supabase returnerar timestamptz som en fullt TZ-medveten sträng, så
+// new Date() tolkar den korrekt oavsett var klienten befinner sig.
+function formatKickoff(kickoff) {
+  if (!kickoff) return null
+  return new Date(kickoff).toLocaleString('sv-SE', {
+    weekday: 'short',
+    day:     'numeric',
+    month:   'short',
+    hour:    '2-digit',
+    minute:  '2-digit',
+    timeZone: 'Europe/Stockholm',
+  })
 }
 
 // Neutral, medvetet designad platshållare för lag som ännu inte är fastställda
@@ -82,12 +98,17 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
   const homeTeam   = findTeamByName(homeLabel.main)
   const awayTeam   = findTeamByName(awayLabel.main)
   const finished   = match.status === 'finished'
-  // Lås också vid kickoff-tid så knapparna aldrig är klickbara efter start,
-  // även om admin ännu inte satt status till 'finished'.
+  // Lås vid kickoff-tid, även om admin ännu inte satt status 'finished'.
   const kickedOff  = match.kickoff ? now >= new Date(match.kickoff) : false
   const locked     = finished || kickedOff
+  // Distinktionen kickedOff && !finished används för "Pågår"-badge.
+  const inProgress = kickedOff && !finished
   const hasResult  = finished && match.home_goals != null && match.away_goals != null
   const correct    = hasResult && tip && tip === match.result
+  // Tid och nedräkning (scoreCalculator hanterar TZ-medvetna ISO-strängar korrekt)
+  const kickoffStr = formatKickoff(match.kickoff)
+  const countdown  = !locked && match.kickoff ? getCountdown(match.kickoff) : null
+  const soon       = !locked && match.kickoff ? isMatchSoon(match.kickoff, 60) : false
 
   return (
     <div
@@ -139,7 +160,35 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
         </div>
 
         <div className="flex items-center gap-1.5 shrink-0">
-          {/* Riktigt resultat när matchen är spelad */}
+
+          {/* Nedräkning – visas bara om matchen är inom 7 dagar och inte låst */}
+          {countdown && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono hidden sm:inline"
+                  style={{
+                    background: soon ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.10)',
+                    color:      soon ? '#F87171' : '#34D399',
+                  }}>
+              {soon ? '⚡ ' : ''}{countdown}
+            </span>
+          )}
+
+          {/* Kickoff-tid – amber när öppen, grå när låst */}
+          {kickoffStr && (
+            <span className="text-xs font-mono shrink-0"
+                  style={{ color: locked ? '#475569' : '#F59E0B' }}>
+              {kickoffStr}
+            </span>
+          )}
+
+          {/* "Pågår"-badge: matchen har kickat igång men är inte avslutad ännu */}
+          {inProgress && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                  style={{ background:'rgba(239,68,68,0.15)', color:'#F87171' }}>
+              Pågår
+            </span>
+          )}
+
+          {/* Riktigt resultat när matchen är spelad (status = finished) */}
           {hasResult && (
             <span className="text-xs px-1.5 py-0.5 rounded-full font-mono"
                   style={{
@@ -150,7 +199,7 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
             </span>
           )}
 
-          {/* Låst-indikator */}
+          {/* Tips-badge eller låsikon */}
           {locked ? (
             tip ? (
               <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
