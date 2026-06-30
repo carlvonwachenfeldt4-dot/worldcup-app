@@ -119,91 +119,90 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
       {/* ─ Kollapsad rubrik ─ */}
       <button
         onClick={() => !locked && onToggle(match.match_id)}
-        className="w-full flex items-center gap-2 px-3 py-2.5 text-left"
+        className="w-full flex flex-col gap-0.5 px-3 py-2.5 text-left"
         style={{
           background: expanded ? '#0F172A' : 'rgba(255,255,255,0.02)',
           cursor: locked ? 'default' : 'pointer',
         }}
       >
-        {/* Hemmalag – fast bredd så att "vs" alltid hamnar i samma position */}
-        <div className="flex items-center gap-2 shrink-0 w-[108px] sm:w-[136px]">
-          {homeTeam ? <Flag iso2={homeTeam.iso2} size="sm" /> : <PlaceholderFlag />}
-          <div className="flex flex-col leading-tight min-w-0">
-            <span className="text-xs font-semibold" style={{ color:'#F1F5F9' }}>
+        {/* ── Rad 1: Lagnamn + badges ────────────────────────────────────────── */}
+        <div className="flex items-center gap-2 w-full min-w-0">
+
+          {/* Hemmalag – fast bredd, "vs" hamnar alltid i samma position */}
+          <div className="flex items-center gap-2 shrink-0 w-[108px] sm:w-[136px]">
+            {homeTeam ? <Flag iso2={homeTeam.iso2} size="sm" /> : <PlaceholderFlag />}
+            <span className="text-xs font-semibold truncate" style={{ color:'#F1F5F9' }}>
               {homeLabel.main}
             </span>
           </div>
-        </div>
 
-        <span className="text-xs shrink-0" style={{ color:'#475569' }}>vs</span>
+          <span className="text-xs shrink-0" style={{ color:'#475569' }}>vs</span>
 
-        {/* Bortalag – fyller resterande utrymme, trycker statusikoner till höger */}
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          {awayTeam ? <Flag iso2={awayTeam.iso2} size="sm" /> : <PlaceholderFlag />}
-          <div className="flex flex-col leading-tight min-w-0">
-            <span className="text-xs font-semibold" style={{ color:'#F1F5F9' }}>
+          {/* Bortalag – fyller resterande utrymme och trunkeras vid behov */}
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {awayTeam ? <Flag iso2={awayTeam.iso2} size="sm" /> : <PlaceholderFlag />}
+            <span className="text-xs font-semibold truncate" style={{ color:'#F1F5F9' }}>
               {awayLabel.main}
             </span>
           </div>
-        </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
-
-          {/* Nedräkning – visas bara om matchen är inom 7 dagar och inte låst */}
-          {countdown && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono hidden sm:inline"
-                  style={{
-                    background: soon ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.10)',
-                    color:      soon ? '#F87171' : '#34D399',
-                  }}>
-              {soon ? '⚡ ' : ''}{countdown}
-            </span>
-          )}
-
-          {/* Kickoff-tid – amber när öppen, grå när låst */}
-          {kickoffStr && (
-            <span className="text-xs font-mono shrink-0"
-                  style={{ color: locked ? '#475569' : '#F59E0B' }}>
-              {kickoffStr}
-            </span>
-          )}
-
-          {/* Riktigt resultat när matchen är spelad (status = finished) */}
-          {hasResult && (
-            <span className="text-xs px-1.5 py-0.5 rounded-full font-mono"
-                  style={{
-                    background: correct ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.06)',
-                    color:      correct ? '#34D399' : '#94A3B8',
-                  }}>
-              {match.home_goals}–{match.away_goals}
-            </span>
-          )}
-
-          {/* Tips-badge eller låsikon */}
-          {locked ? (
-            tip ? (
-              <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
-                    style={{ background:'#334155', color:'#94A3B8' }}>
-                {tip}
+          {/* Riktigt resultat + tips-badge/låsikon + expandpil */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {hasResult && (
+              <span className="text-xs px-1.5 py-0.5 rounded-full font-mono"
+                    style={{
+                      background: correct ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.06)',
+                      color:      correct ? '#34D399' : '#94A3B8',
+                    }}>
+                {match.home_goals}–{match.away_goals}
               </span>
+            )}
+            {locked ? (
+              tip ? (
+                <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
+                      style={{ background:'#334155', color:'#94A3B8' }}>
+                  {tip}
+                </span>
+              ) : (
+                <span className="text-xs" style={{ color:'#475569' }}>🔒</span>
+              )
             ) : (
-              <span className="text-xs" style={{ color:'#475569' }}>🔒</span>
-            )
-          ) : (
-            tip ? (
-              <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
-                    style={{ background:'#F59E0B', color:'#0F172A' }}>
-                {tip}
+              tip ? (
+                <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
+                      style={{ background:'#F59E0B', color:'#0F172A' }}>
+                  {tip}
+                </span>
+              ) : null
+            )}
+            {!locked && (
+              <span className="text-xs ml-0.5" style={{ color:'#475569' }}>
+                {expanded ? '▲' : '▼'}
               </span>
-            ) : null
-          )}
-
-          {!locked && (
-            <span className="text-xs ml-1" style={{ color:'#475569' }}>
-              {expanded ? '▲' : '▼'}
-            </span>
-          )}
+            )}
+          </div>
         </div>
+
+        {/* ── Rad 2: Kickoff-tid + nedräkning ────────────────────────────────── */}
+        {/* Placeras på egen rad så att den aldrig konkurrerar om bredd med lagnamnen. */}
+        {/* pl-[28px] = flaggbredd(20) + gap(8) – aligns under hemmalags namn.       */}
+        {(kickoffStr || countdown) && (
+          <div className="flex items-center gap-1.5 pl-[28px]">
+            {countdown && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono"
+                    style={{
+                      background: soon ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.10)',
+                      color:      soon ? '#F87171' : '#34D399',
+                    }}>
+                {soon ? '⚡ ' : ''}{countdown}
+              </span>
+            )}
+            {kickoffStr && (
+              <span className="text-xs font-mono" style={{ color: locked ? '#475569' : '#F59E0B' }}>
+                {kickoffStr}
+              </span>
+            )}
+          </div>
+        )}
       </button>
 
       {/* ─ Expanderad del med 1X2-knappar (endast när ej låst) ─ */}
