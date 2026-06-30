@@ -101,8 +101,6 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
   // Lås vid kickoff-tid, även om admin ännu inte satt status 'finished'.
   const kickedOff  = match.kickoff ? now >= new Date(match.kickoff) : false
   const locked     = finished || kickedOff
-  // Distinktionen kickedOff && !finished används för "Pågår"-badge.
-  const inProgress = kickedOff && !finished
   const hasResult  = finished && match.home_goals != null && match.away_goals != null
   const correct    = hasResult && tip && tip === match.result
   // Tid och nedräkning (scoreCalculator hanterar TZ-medvetna ISO-strängar korrekt)
@@ -177,14 +175,6 @@ function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
             <span className="text-xs font-mono shrink-0"
                   style={{ color: locked ? '#475569' : '#F59E0B' }}>
               {kickoffStr}
-            </span>
-          )}
-
-          {/* "Pågår"-badge: matchen har kickat igång men är inte avslutad ännu */}
-          {inProgress && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
-                  style={{ background:'rgba(239,68,68,0.15)', color:'#F87171' }}>
-              Pågår
             </span>
           )}
 
