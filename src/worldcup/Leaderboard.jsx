@@ -5,7 +5,7 @@ import UserProfileModal from './UserProfileModal'
 
 function calcMyScore(groupTips, bracketTips) {
   return Object.values(groupTips).filter(Boolean).length * 3
-       + Object.values(bracketTips ?? {}).filter(Boolean).length * 3
+       + Object.values(bracketTips ?? {}).filter(v => (v && typeof v === 'object') ? !!v.tip : !!v).length * 3
 }
 
 const TIERS = [

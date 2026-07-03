@@ -137,7 +137,9 @@ export default function Profile({ user, onBack, onSignOut, profile: profileProp,
                   <p className="text-xs" style={{ color:'#64748B' }}>Inga slutspelstips</p>
                 ) : (
                   <p className="text-xs mt-2" style={{ color:'#94A3B8' }}>
-                    {Object.values(bracketTips ?? {}).filter(Boolean).length} slutspelstips sparade
+                    {Object.values(bracketTips ?? {}).filter(v =>
+                      (v && typeof v === 'object') ? !!v.tip : !!v
+                    ).length} slutspelstips sparade
                   </p>
                 )}
               </div>

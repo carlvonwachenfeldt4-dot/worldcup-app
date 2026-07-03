@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TOTAL_MATCHES } from './data'
 import { supabase, signOut, loadGroupTips, saveGroupTip, deleteGroupTip,
-         loadBracketTips, saveBracketTip, deleteBracketTip, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, loadVmWinnerPick } from '../lib/supabase'
+         loadBracketTips, saveBracketTipFull, deleteBracketTip, loadPlayerPredictions, fetchLeaderboard, getProfile, syncMatchResultsFromAPI, syncPlayerStatsFromAPI, loadVmWinnerPick } from '../lib/supabase'
 import BonusTab          from './BonusTab'
 import GroupStage        from './GroupStage'
 import Bracket           from './Bracket'
@@ -68,6 +68,8 @@ export default function WorldCupApp() {
   const menuRef = useRef(null)
   const tipDebounce = useRef({})
   const bracketTipDebounce = useRef({})
+  // Ref för att alltid läsa senaste bracketTips i debounce-callbacken
+  const bracketTipsRef = useRef({})
 
   // ─── Auth: lyssna på session-förändringar ────────────────────────────────
   useEffect(() => {
@@ -223,15 +225,29 @@ export default function WorldCupApp() {
     }
   }, [user])
 
-  // ─── Bracket 1X2-tips ─────────────────────────────────────────────────────
-  const handleBracketTip = useCallback((matchId, val) => {
-    setBracketTips(prev => ({ ...prev, [matchId]: val }))
+  // Håll ref synkad med state för att undvika stale closure i debounce
+  useEffect(() => { bracketTipsRef.current = bracketTips }, [bracketTips])
+
+  // ─── Bracket 1X2-tips + övertid/straffar ──────────────────────────────────
+  // field: 'tip' | 'et_tip' | 'pen_tip'
+  const handleBracketTip = useCallback((matchId, field, val) => {
+    setBracketTips(prev => {
+      const curr = prev[matchId]
+      const base = (curr && typeof curr === 'object')
+        ? curr
+        : { tip: curr ?? null, et_tip: null, pen_tip: null }
+      return { ...prev, [matchId]: { ...base, [field]: val } }
+    })
     if (user) {
       clearTimeout(bracketTipDebounce.current[matchId])
       bracketTipDebounce.current[matchId] = setTimeout(() => {
-        const op = val
-          ? saveBracketTip(user.id, matchId, val)
-          : deleteBracketTip(user.id, matchId)
+        const entry   = bracketTipsRef.current[matchId] ?? {}
+        const tip     = (entry && typeof entry === 'object') ? entry.tip     : (entry ?? null)
+        const et_tip  = (entry && typeof entry === 'object') ? entry.et_tip  : null
+        const pen_tip = (entry && typeof entry === 'object') ? entry.pen_tip : null
+        const op = (!tip && !et_tip && !pen_tip)
+          ? deleteBracketTip(user.id, matchId)
+          : saveBracketTipFull(user.id, matchId, tip, et_tip, pen_tip)
         op.catch(() => setSaveError('Tipset kunde inte sparas – kontrollera uppkopplingen och försök igen.'))
       }, 600)
     }

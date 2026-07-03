@@ -100,18 +100,84 @@ function TipButtons({ matchId, tip, home, away, onTip }) {
   )
 }
 
+// ─── TipButtonsPenalty – enbart 1/2, ingen X (straffar kan ej sluta lika) ───
+
+function TipButtonsPenalty({ matchId, tip, home, away, onTip }) {
+  const opts = [
+    { val:'1', label: `1  ${home}` },
+    { val:'2', label: `${away}  2` },
+  ]
+  return (
+    <div className="flex gap-2">
+      {opts.map(o => (
+        <button
+          key={o.val}
+          onClick={e => { e.stopPropagation(); onTip(matchId, tip === o.val ? null : o.val) }}
+          className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
+          style={{
+            background: tip === o.val ? '#F59E0B' : '#1E293B',
+            color:      tip === o.val ? '#0F172A' : '#64748B',
+            border:     `1.5px solid ${tip === o.val ? '#F59E0B' : '#334155'}`,
+          }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ─── TipResultRow – visa tips + rätt/fel när matchen är avgjord ─────────────
+
+function TipResultRow({ label, tip, result }) {
+  if (!tip) return null
+  const decided = result != null
+  const correct = decided && tip === result
+  return (
+    <div className="flex items-center justify-between py-0.5">
+      <span className="text-[10px] uppercase tracking-wider font-semibold"
+            style={{ color:'#475569' }}>
+        {label}
+      </span>
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-bold px-2 py-0.5 rounded-lg"
+              style={{
+                background: !decided ? 'rgba(255,255,255,0.05)'
+                  : correct ? 'rgba(52,211,153,0.15)'
+                  : 'rgba(248,113,113,0.12)',
+                color: !decided ? '#94A3B8' : correct ? '#34D399' : '#F87171',
+              }}>
+          {tip}
+        </span>
+        {decided ? (
+          <span className="text-[10px]" style={{ color: correct ? '#34D399' : '#F87171' }}>
+            {correct ? '✓' : `✗ (${result})`}
+          </span>
+        ) : (
+          <span className="text-[10px]" style={{ color:'#334155' }}>— ej avgjort</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── MatchCard (FotMob-inspirerad layout) ────────────────────────────────────
 
-function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
-  const finished   = match.status === 'finished'
-  const kickedOff  = match.kickoff ? now >= new Date(match.kickoff) : false
-  const locked     = finished || kickedOff
-  const hasResult  = finished && match.home_goals != null && match.away_goals != null
-  const correct    = hasResult && !!tip && tip === match.result
-  const teamsKnown = !isPlaceholder(match.home_team) && !isPlaceholder(match.away_team)
-  const canToggle  = teamsKnown && !locked
-  const countdown  = !locked && match.kickoff ? getCountdown(match.kickoff) : null
-  const soon       = !locked && match.kickoff ? isMatchSoon(match.kickoff, 60) : false
+// Rundor där övertid och straffar är möjliga
+const KNOCKOUT_OT_ROUNDS = new Set(['Kvartsfinal', 'Semifinal', 'Bronsmatch', 'Final'])
+
+function MatchCard({ match, tip, etTip, penTip, onTip, expanded, onToggle, now }) {
+  const finished        = match.status === 'finished'
+  const kickedOff       = match.kickoff ? now >= new Date(match.kickoff) : false
+  const locked          = finished || kickedOff
+  const hasResult       = finished && match.home_goals != null && match.away_goals != null
+  const correct         = hasResult && !!tip && tip === match.result
+  const teamsKnown      = !isPlaceholder(match.home_team) && !isPlaceholder(match.away_team)
+  const isKnockoutWithOT = KNOCKOUT_OT_ROUNDS.has(match.round)
+  // Tillåt expansion av låsta KV+-matcher för att visa tips/resultat-jämförelse
+  const canToggle       = teamsKnown && (!locked || (isKnockoutWithOT && hasResult))
+  const countdown       = !locked && match.kickoff ? getCountdown(match.kickoff) : null
+  const soon            = !locked && match.kickoff ? isMatchSoon(match.kickoff, 60) : false
 
   const homeLabel  = splitTeamLabel(match.home_team)
   const awayLabel  = splitTeamLabel(match.away_team)
@@ -131,6 +197,8 @@ function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
 
   // Visuell "expanded"-effekt enbart när kortet faktiskt kan öppnas
   const showExpanded = expanded && canToggle
+  // View-only: låst kvartsfinal+ med känt resultat — visas utan redigeringsknappar
+  const viewOnly = locked && isKnockoutWithOT && showExpanded
 
   return (
     <div
@@ -242,33 +310,90 @@ function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
         </div>
 
         {/* ── Statuskolumn: tip-badge / låsikon / pil ── */}
-        <div className="flex flex-col items-center justify-center shrink-0 px-3 gap-1.5"
+        <div className="flex flex-col items-center justify-center shrink-0 px-3 gap-1"
              style={{ minWidth: 40 }}>
+          {/* Huvud-tipsbadge */}
           {tip ? (
             <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
                   style={tipStyle}>
               {tip}
             </span>
-          ) : locked ? (
+          ) : locked && !canToggle ? (
             <span className="text-xs" style={{ color:'#334155' }}>🔒</span>
-          ) : canToggle ? (
-            <span className="text-xs" style={{ color:'#475569' }}>
+          ) : null}
+          {/* Expandpil – synlig även för låsta KV+-matcher med resultat */}
+          {canToggle && (
+            <span className="text-[10px]" style={{ color:'#475569' }}>
               {showExpanded ? '▲' : '▼'}
             </span>
-          ) : null}
+          )}
         </div>
       </button>
 
-      {/* ── Expanderad: 1X2-knappar ── */}
+      {/* ── Expanderad: edit-läge eller view-only-läge ── */}
       {showExpanded && (
-        <div className="px-3 pb-3 pt-1">
-          <TipButtons
-            matchId={match.match_id}
-            tip={tip}
-            home={homeLabel.main}
-            away={awayLabel.main}
-            onTip={onTip}
-          />
+        <div className="px-3 pb-3 pt-2 space-y-3">
+          {viewOnly ? (
+            /* ── View-only: tips + rätt/fel per sektion (låst KV+) ── */
+            <div className="space-y-1.5">
+              <TipResultRow label="Fulltid"  tip={tip}    result={match.result}     />
+              <TipResultRow label="Övertid"  tip={etTip}  result={match.et_result}  />
+              <TipResultRow label="Straffar" tip={penTip}  result={match.pen_result} />
+              {!tip && !etTip && !penTip && (
+                <p className="text-xs text-center" style={{ color:'#475569' }}>Inget tips lämnades</p>
+              )}
+            </div>
+          ) : (
+            /* ── Edit-läge: tippningsknappar ── */
+            <>
+              {/* Fulltid */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wider mb-1.5"
+                   style={{ color:'#64748B' }}>Fulltid</p>
+                <TipButtons matchId={match.match_id} tip={tip}
+                            home={homeLabel.main} away={awayLabel.main}
+                            onTip={(id, val) => onTip(id, 'tip', val)} />
+              </div>
+
+              {isKnockoutWithOT && (
+                <>
+                  <div style={{ height:1, background:'#1E293B' }} />
+
+                  {/* Övertid */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider"
+                         style={{ color:'#64748B' }}>Övertid</p>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full"
+                            style={{ background:'rgba(99,102,241,0.12)', color:'#818CF8' }}>
+                        frivillig · +2p om det sker
+                      </span>
+                    </div>
+                    <TipButtons matchId={match.match_id} tip={etTip}
+                                home={homeLabel.main} away={awayLabel.main}
+                                onTip={(id, val) => onTip(id, 'et_tip', val)} />
+                  </div>
+
+                  <div style={{ height:1, background:'#1E293B' }} />
+
+                  {/* Straffar */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider"
+                         style={{ color:'#64748B' }}>Straffar</p>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded-full"
+                            style={{ background:'rgba(99,102,241,0.12)', color:'#818CF8' }}>
+                        frivillig · +2p om det sker
+                      </span>
+                    </div>
+                    <TipButtonsPenalty matchId={match.match_id} tip={penTip}
+                                       home={homeLabel.main} away={awayLabel.main}
+                                       onTip={(id, val) => onTip(id, 'pen_tip', val)} />
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -279,7 +404,8 @@ function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
 
 function RoundSection({ label, matches, tips, onTip, openMatch, onToggle, now }) {
   const tippable = matches.filter(m => !isPlaceholder(m.home_team) && !isPlaceholder(m.away_team))
-  const filled   = tippable.filter(m => tips[m.match_id]).length
+  // Progress räknar bara fulltidstippet (req 6: övertid/straffar är frivilliga)
+  const filled   = tippable.filter(m => tips[m.match_id]?.tip).length
   const total    = tippable.length
 
   return (
@@ -299,17 +425,25 @@ function RoundSection({ label, matches, tips, onTip, openMatch, onToggle, now })
         )}
       </div>
       <div className="p-2 space-y-1.5">
-        {matches.map(m => (
-          <MatchCard
-            key={m.match_id}
-            match={m}
-            tip={tips[m.match_id] ?? null}
-            onTip={onTip}
-            expanded={openMatch === m.match_id}
-            onToggle={onToggle}
-            now={now}
-          />
-        ))}
+        {matches.map(m => {
+          const entry = tips[m.match_id]
+          const tip    = (entry && typeof entry === 'object') ? entry.tip     : (entry ?? null)
+          const etTip  = (entry && typeof entry === 'object') ? entry.et_tip  : null
+          const penTip = (entry && typeof entry === 'object') ? entry.pen_tip : null
+          return (
+            <MatchCard
+              key={m.match_id}
+              match={m}
+              tip={tip}
+              etTip={etTip}
+              penTip={penTip}
+              onTip={onTip}
+              expanded={openMatch === m.match_id}
+              onToggle={onToggle}
+              now={now}
+            />
+          )
+        })}
       </div>
     </div>
   )
@@ -394,7 +528,10 @@ export default function Bracket({ bracketTips, onTip }) {
 
   // Progress: bara tippningsbara matcher (ej platshållare)
   const tippableAll = matches.filter(m => !isPlaceholder(m.home_team) && !isPlaceholder(m.away_team))
-  const tippedTotal = tippableAll.filter(m => bracketTips[m.match_id]).length
+  const tippedTotal = tippableAll.filter(m => {
+    const e = bracketTips[m.match_id]
+    return (e && typeof e === 'object') ? !!e.tip : !!e
+  }).length
 
   const activeDef = ROUND_DEFS.find(r => r.id === activeRound)
   const activeMs  = byRound[activeRound] ?? []

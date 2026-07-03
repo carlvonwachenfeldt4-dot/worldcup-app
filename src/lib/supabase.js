@@ -83,20 +83,24 @@ export async function saveGroupTip(userId, matchId, tip) {
 export async function fetchBracketMatches() {
   const { data, error } = await supabase
     .from('bracket_matches')
-    .select('match_id, match_number, sort_order, round, home_team, away_team, kickoff, status, home_goals, away_goals, result')
+    .select('match_id, match_number, sort_order, round, home_team, away_team, kickoff, status, home_goals, away_goals, result, et_result, pen_result')
     .order('sort_order')
   if (error) throw error
   return data ?? []
 }
 
-// Läs in alla slutspelstips för inloggad användare
+// Läs in alla slutspelstips för inloggad användare.
+// Returnerar { [match_id]: { tip, et_tip, pen_tip } } – samma nyckelstruktur
+// som tidigare, men värdet är nu ett objekt istället för en sträng.
 export async function loadBracketTips(userId) {
   const { data, error } = await supabase
     .from('bracket_tips')
-    .select('match_id, tip')
+    .select('match_id, tip, et_tip, pen_tip')
     .eq('user_id', userId)
   if (error) throw error
-  return Object.fromEntries(data.map(r => [r.match_id, r.tip]))
+  return Object.fromEntries(
+    data.map(r => [r.match_id, { tip: r.tip ?? null, et_tip: r.et_tip ?? null, pen_tip: r.pen_tip ?? null }])
+  )
 }
 
 // Ta bort ett slutspelstips
@@ -109,7 +113,23 @@ export async function deleteBracketTip(userId, matchId) {
   if (error) throw error
 }
 
-// Spara ett slutspelstips via server-side konfliktkontroll.
+// Spara ett slutspelstips med övertid och straffar (KV/SF/BF/Final).
+// Skicka null för de fält som inte är valda. Används för alla bracket-rundor.
+export async function saveBracketTipFull(userId, matchId, tip, etTip, penTip) {
+  const { data, error } = await supabase.rpc('safe_save_bracket_tip_full', {
+    p_user_id:  userId,
+    p_match_id: matchId,
+    p_tip:      tip     ?? null,
+    p_et_tip:   etTip   ?? null,
+    p_pen_tip:  penTip  ?? null,
+  })
+  if (error) throw error
+  if (!data || data.length === 0) {
+    throw new Error('Uppdatering av slutspelstipset avvisades eftersom en nyare ändring redan sparats.')
+  }
+}
+
+// Spara ett enkelt slutspelstips (behålls för Sextondelsfinal/Åttondelsfinal).
 export async function saveBracketTip(userId, matchId, tip) {
   const { data, error } = await supabase.rpc('safe_save_bracket_tip', {
     p_user_id: userId,
