@@ -383,7 +383,7 @@ function MatchCard({ match, tip, etTip, penTip, onTip, expanded, onToggle, now }
                          style={{ color:'#64748B' }}>Straffar</p>
                       <span className="text-[9px] px-1.5 py-0.5 rounded-full"
                             style={{ background:'rgba(99,102,241,0.12)', color:'#818CF8' }}>
-                        frivillig · +2p om det sker
+                        frivillig · +1p om det sker
                       </span>
                     </div>
                     <TipButtonsPenalty matchId={match.match_id} tip={penTip}
