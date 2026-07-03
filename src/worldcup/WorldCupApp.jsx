@@ -17,10 +17,10 @@ function loadLocal(key, fb) {
 }
 
 const TABS = [
-  { id:'groups',      label:'Gruppspel / VM-Vinnare', mobileLabel:'Grupp',   icon:'🏟️' },
   { id:'bracket',     label:'Slutspel',               mobileLabel:'Slutspel',icon:'🏆' },
   { id:'bonus',        label:'Bonuspoäng',             mobileLabel:'Bonus',   icon:'⭐' },
   { id:'leaderboard', label:'Ranking',                mobileLabel:'Ranking', icon:'🌍' },
+  { id:'groups',      label:'Gruppspel / VM-Vinnare', mobileLabel:'Grupp',   icon:'🏟️' },
 ]
 
 const DEMO_PREVIEW = typeof window !== 'undefined'
@@ -39,7 +39,7 @@ export default function WorldCupApp() {
     avatar_url: 'https://api.dicebear.com/6.x/avataaars/svg?seed=worldcup-demo',
   }
 
-  const [tab, setTab] = useState('groups')
+  const [tab, setTab] = useState('bracket')
 
   // Grupptips: { matchId: '1'|'X'|'2' }
   const [tips, setTips] = useState(() => loadLocal('wc26-tips', {}))
