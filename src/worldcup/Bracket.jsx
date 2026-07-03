@@ -8,11 +8,11 @@ import { getCountdown, isMatchSoon } from '../lib/scoreCalculator'
 // `extra` anger en underrunda som visas som en separat sektion under samma pill.
 
 const ROUND_DEFS = [
-  { id: 'R32',         label: 'Sextondelsfinal', extra: null          },
-  { id: 'R16',         label: 'Åttondelsfinal',  extra: null          },
-  { id: 'Kvartsfinal', label: 'Kvartsfinal',      extra: null          },
-  { id: 'Semifinal',   label: 'Semifinal',         extra: null          },
-  { id: 'Final',       label: 'Final',             extra: 'Bronsmatch'  },
+  { id: 'Sextondelsfinal', label: 'Sextondelsfinal', extra: null          },
+  { id: 'Åttondelsfinal',  label: 'Åttondelsfinal',  extra: null          },
+  { id: 'Kvartsfinal',     label: 'Kvartsfinal',      extra: null          },
+  { id: 'Semifinal',       label: 'Semifinal',         extra: null          },
+  { id: 'Final',           label: 'Final',             extra: 'Bronsmatch'  },
 ]
 
 // ─── Hjälpfunktioner ─────────────────────────────────────────────────────────
@@ -149,20 +149,14 @@ function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
           minHeight: 64,
         }}
       >
-        {/* ── Vänsterkolumn: datum/tid ELLER FT-resultat ── */}
+        {/* ── Vänsterkolumn: datum/tid ELLER bara "FT" ── */}
         <div
           className="flex flex-col items-center justify-center shrink-0 px-2 gap-0.5"
           style={{ width: 56, borderRight: '1px solid #1E293B' }}
         >
-          {hasResult ? (
-            <>
-              <span className="text-[9px] font-semibold uppercase tracking-wide"
-                    style={{ color:'#475569' }}>FT</span>
-              <span className="text-base font-black font-mono leading-none"
-                    style={{ color:'#F1F5F9' }}>
-                {match.home_goals}–{match.away_goals}
-              </span>
-            </>
+          {finished ? (
+            <span className="text-[10px] font-bold uppercase tracking-wide"
+                  style={{ color:'#475569' }}>FT</span>
           ) : match.kickoff ? (
             <>
               <span className="text-[10px] font-medium leading-none"
@@ -189,48 +183,61 @@ function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
           )}
         </div>
 
-        {/* ── Lagkolumn: hemmalag och bortalag staplade ── */}
-        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1 px-3 py-2.5">
+        {/* ── Lag + målkolumn ── */}
+        <div className="flex-1 min-w-0 flex items-stretch">
 
-          {/* Hemmalag */}
-          <div className="flex items-center gap-2 min-w-0">
-            {!isPlaceholder(match.home_team) && homeTeam
-              ? <Flag iso2={homeTeam.iso2} size="sm" />
-              : <PlaceholderFlag />}
-            <span
-              className="text-sm truncate"
-              style={{
-                color:      homeWon ? '#F1F5F9' : locked ? '#94A3B8' : '#F1F5F9',
-                fontWeight: homeWon ? 800 : 600,
-              }}
-            >
-              {homeLabel.main}
-            </span>
-            {homeWon && <span className="text-[10px] shrink-0" style={{ color:'#34D399' }}>✓</span>}
+          {/* Lagnamn (flagga + namn staplade) */}
+          <div className="flex-1 min-w-0 flex flex-col justify-center gap-1 px-3 py-2.5">
+
+            {/* Hemmalag */}
+            <div className="flex items-center gap-2 min-w-0">
+              {!isPlaceholder(match.home_team) && homeTeam
+                ? <Flag iso2={homeTeam.iso2} size="sm" />
+                : <PlaceholderFlag />}
+              <span className="text-sm truncate"
+                    style={{
+                      color:      hasResult ? (homeWon ? '#F1F5F9' : awayWon ? '#475569' : '#94A3B8') : '#F1F5F9',
+                      fontWeight: homeWon ? 700 : 500,
+                    }}>
+                {homeLabel.main}
+              </span>
+            </div>
+
+            {/* Bortalag */}
+            <div className="flex items-center gap-2 min-w-0">
+              {!isPlaceholder(match.away_team) && awayTeam
+                ? <Flag iso2={awayTeam.iso2} size="sm" />
+                : <PlaceholderFlag />}
+              <span className="text-sm truncate"
+                    style={{
+                      color:      hasResult ? (awayWon ? '#F1F5F9' : homeWon ? '#475569' : '#94A3B8') : '#F1F5F9',
+                      fontWeight: awayWon ? 700 : 500,
+                    }}>
+                {awayLabel.main}
+              </span>
+            </div>
+
+            {/* "Lag ej klara"-notering */}
+            {!teamsKnown && (
+              <span className="text-[10px] mt-0.5" style={{ color:'#475569' }}>
+                Lag ej klara – tippning stängt
+              </span>
+            )}
           </div>
 
-          {/* Bortalag */}
-          <div className="flex items-center gap-2 min-w-0">
-            {!isPlaceholder(match.away_team) && awayTeam
-              ? <Flag iso2={awayTeam.iso2} size="sm" />
-              : <PlaceholderFlag />}
-            <span
-              className="text-sm truncate"
-              style={{
-                color:      awayWon ? '#F1F5F9' : locked ? '#94A3B8' : '#F1F5F9',
-                fontWeight: awayWon ? 800 : 600,
-              }}
-            >
-              {awayLabel.main}
-            </span>
-            {awayWon && <span className="text-[10px] shrink-0" style={{ color:'#34D399' }}>✓</span>}
-          </div>
-
-          {/* "Lag ej klara"-notering för ej fastställda matcher */}
-          {!teamsKnown && (
-            <span className="text-[10px] mt-0.5" style={{ color:'#475569' }}>
-              Lag ej klara – tippning stängt
-            </span>
+          {/* Mål per lag (bara vid färdigt resultat) */}
+          {hasResult && (
+            <div className="flex flex-col justify-center items-center shrink-0 pr-3 gap-1 py-2.5"
+                 style={{ width: 28 }}>
+              <span className="text-sm font-black font-mono"
+                    style={{ color: homeWon ? '#F1F5F9' : awayWon ? '#475569' : '#94A3B8' }}>
+                {match.home_goals}
+              </span>
+              <span className="text-sm font-black font-mono"
+                    style={{ color: awayWon ? '#F1F5F9' : homeWon ? '#475569' : '#94A3B8' }}>
+                {match.away_goals}
+              </span>
+            </div>
           )}
         </div>
 
@@ -315,7 +322,7 @@ export default function Bracket({ bracketTips, onTip }) {
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState(null)
   const [openMatch,   setOpenMatch]   = useState(null)
-  const [activeRound, setActiveRound] = useState('R32')
+  const [activeRound, setActiveRound] = useState('Sextondelsfinal')
 
   // Klocka var 30:e sekund – samma mönster som GroupStage/BonusTab
   const [now, setNow] = useState(() => new Date())
@@ -455,20 +462,7 @@ export default function Bracket({ bracketTips, onTip }) {
             })}
           </div>
 
-          {/* ─ Bronsmatch (extra sektion under Final-pillen) ─ */}
-          {extraMs.length > 0 && (
-            <RoundSection
-              label={activeDef.extra}
-              matches={extraMs}
-              tips={bracketTips}
-              onTip={onTip}
-              openMatch={openMatch}
-              onToggle={toggle}
-              now={now}
-            />
-          )}
-
-          {/* ─ Matcherna i aktiv runda ─ */}
+          {/* ─ Final (aktiv runda) visas FÖRE Bronsmatch ─ */}
           {activeMs.length > 0 ? (
             <RoundSection
               label={activeDef?.label ?? activeRound}
@@ -486,6 +480,19 @@ export default function Bracket({ bracketTips, onTip }) {
                 Matcherna i den här rundan är inte fastställda ännu.
               </p>
             </div>
+          )}
+
+          {/* ─ Bronsmatch (extra sektion, visas UNDER Final) ─ */}
+          {extraMs.length > 0 && (
+            <RoundSection
+              label={activeDef.extra}
+              matches={extraMs}
+              tips={bracketTips}
+              onTip={onTip}
+              openMatch={openMatch}
+              onToggle={toggle}
+              now={now}
+            />
           )}
         </>
       )}
