@@ -164,7 +164,7 @@ function TipResultRow({ label, tip, result }) {
 // ─── MatchCard (FotMob-inspirerad layout) ────────────────────────────────────
 
 // Rundor där övertid och straffar är möjliga
-const KNOCKOUT_OT_ROUNDS = new Set(['Kvartsfinal', 'Semifinal', 'Bronsmatch', 'Final'])
+const KNOCKOUT_OT_ROUNDS = new Set(['Åttondelsfinal', 'Kvartsfinal', 'Semifinal', 'Bronsmatch', 'Final'])
 
 function MatchCard({ match, tip, etTip, penTip, onTip, expanded, onToggle, now }) {
   const finished        = match.status === 'finished'
