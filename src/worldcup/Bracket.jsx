@@ -1,10 +1,21 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { TEAMS } from './data'
 import Flag from './Flag'
 import { supabase, fetchBracketMatches } from '../lib/supabase'
 import { getCountdown, isMatchSoon } from '../lib/scoreCalculator'
 
-// ─── Slå upp flagg-iso2 för ett lagnamn (matchar mot TEAMS i data.js) ────────
+// ─── Rundordning och pill-labels ─────────────────────────────────────────────
+// `extra` anger en underrunda som visas som en separat sektion under samma pill.
+
+const ROUND_DEFS = [
+  { id: 'R32',         label: 'Sextondelsfinal', extra: null          },
+  { id: 'R16',         label: 'Åttondelsfinal',  extra: null          },
+  { id: 'Kvartsfinal', label: 'Kvartsfinal',      extra: null          },
+  { id: 'Semifinal',   label: 'Semifinal',         extra: null          },
+  { id: 'Final',       label: 'Final',             extra: 'Bronsmatch'  },
+]
+
+// ─── Hjälpfunktioner ─────────────────────────────────────────────────────────
 
 function findTeamByName(name) {
   if (!name) return null
@@ -12,9 +23,6 @@ function findTeamByName(name) {
   return Object.values(TEAMS).find(t => t.name.toLowerCase() === lower) ?? null
 }
 
-// Plockar isär t.ex. "Sverige (3:a C/D/F/G/H)" i huvudnamn + platshållarinfo,
-// så att huvudnamnet kan visas i fetstil och platshållarinfon på en egen,
-// mindre textrad istället för att klippas av med "…".
 function splitTeamLabel(name) {
   if (!name) return { main: '', sub: null }
   const m = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/)
@@ -22,23 +30,31 @@ function splitTeamLabel(name) {
   return { main: name.trim(), sub: null }
 }
 
-// Formaterar en ISO-timestamp till svensk local tid, t.ex. "tis 30 jun, 23:00".
-// Supabase returnerar timestamptz som en fullt TZ-medveten sträng, så
-// new Date() tolkar den korrekt oavsett var klienten befinner sig.
-function formatKickoff(kickoff) {
-  if (!kickoff) return null
-  return new Date(kickoff).toLocaleString('sv-SE', {
-    weekday: 'short',
-    day:     'numeric',
-    month:   'short',
-    hour:    '2-digit',
-    minute:  '2-digit',
-    timeZone: 'Europe/Stockholm',
+// Identifierar platshållartext: "W12", "RU3", "L-SF1", "Argentina/Kap Verde"
+function isPlaceholder(name) {
+  if (!name) return true
+  if (name.includes('/')) return true
+  if (/^W\d+/i.test(name.trim())) return true
+  if (/^(RU|L[-\s]?)\d*/i.test(name.trim())) return true
+  return false
+}
+
+// Datum: "6 jul" — tid: "21:00"
+function fmtDay(ts) {
+  if (!ts) return null
+  return new Date(ts).toLocaleString('sv-SE', {
+    day: 'numeric', month: 'short', timeZone: 'Europe/Stockholm',
+  })
+}
+function fmtClock(ts) {
+  if (!ts) return null
+  return new Date(ts).toLocaleString('sv-SE', {
+    hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm',
   })
 }
 
-// Neutral, medvetet designad platshållare för lag som ännu inte är fastställda
-// – ersätter den tomma flaggrutan som annars ser ut som ett laddningsfel.
+// ─── PlaceholderFlag ─────────────────────────────────────────────────────────
+
 function PlaceholderFlag() {
   return (
     <span
@@ -48,30 +64,24 @@ function PlaceholderFlag() {
         background: '#1E293B',
         border: '1px solid #334155',
         color: '#64748B',
-        fontSize: 9,
-        fontWeight: 800,
-        lineHeight: 1,
+        fontSize: 9, fontWeight: 800, lineHeight: 1,
         boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
       }}
       aria-label="Lag ej fastställt"
-    >
-      ?
-    </span>
+    >?</span>
   )
 }
 
-// ─── 1X2-knappar – identiska med gruppspelets TipButtons ─────────────────────
-// home/away ska vara de korta huvudnamnen (utan platshållarsuffix) så knapparna
-// blir jämnstora oavsett hur lång den fullständiga etiketten är.
+// ─── TipButtons ──────────────────────────────────────────────────────────────
 
 function TipButtons({ matchId, tip, home, away, onTip }) {
   const opts = [
     { val:'1', label: `1  ${home}` },
-    { val:'X', label: 'X' },
+    { val:'X', label: 'X'          },
     { val:'2', label: `${away}  2` },
   ]
   return (
-    <div className="flex gap-2 pt-3 pb-1">
+    <div className="flex gap-2 pt-2 pb-1">
       {opts.map(o => (
         <button
           key={o.val}
@@ -90,154 +100,200 @@ function TipButtons({ matchId, tip, home, away, onTip }) {
   )
 }
 
-// ─── Enskild kollapsbar matchrad ──────────────────────────────────────────────
+// ─── MatchCard (FotMob-inspirerad layout) ────────────────────────────────────
 
-function MatchRow({ match, tip, onTip, expanded, onToggle, now }) {
+function MatchCard({ match, tip, onTip, expanded, onToggle, now }) {
+  const finished   = match.status === 'finished'
+  const kickedOff  = match.kickoff ? now >= new Date(match.kickoff) : false
+  const locked     = finished || kickedOff
+  const hasResult  = finished && match.home_goals != null && match.away_goals != null
+  const correct    = hasResult && !!tip && tip === match.result
+  const teamsKnown = !isPlaceholder(match.home_team) && !isPlaceholder(match.away_team)
+  const canToggle  = teamsKnown && !locked
+  const countdown  = !locked && match.kickoff ? getCountdown(match.kickoff) : null
+  const soon       = !locked && match.kickoff ? isMatchSoon(match.kickoff, 60) : false
+
   const homeLabel  = splitTeamLabel(match.home_team)
   const awayLabel  = splitTeamLabel(match.away_team)
   const homeTeam   = findTeamByName(homeLabel.main)
   const awayTeam   = findTeamByName(awayLabel.main)
-  const finished   = match.status === 'finished'
-  // Lås vid kickoff-tid, även om admin ännu inte satt status 'finished'.
-  const kickedOff  = match.kickoff ? now >= new Date(match.kickoff) : false
-  const locked     = finished || kickedOff
-  const hasResult  = finished && match.home_goals != null && match.away_goals != null
-  const correct    = hasResult && tip && tip === match.result
-  // Tid och nedräkning (scoreCalculator hanterar TZ-medvetna ISO-strängar korrekt)
-  const kickoffStr = formatKickoff(match.kickoff)
-  const countdown  = !locked && match.kickoff ? getCountdown(match.kickoff) : null
-  const soon       = !locked && match.kickoff ? isMatchSoon(match.kickoff, 60) : false
+  const homeWon    = hasResult && match.result === '1'
+  const awayWon    = hasResult && match.result === '2'
+
+  // Tips-badge-färg beror på om resultatet är känt
+  const tipStyle = hasResult
+    ? correct
+      ? { background:'rgba(52,211,153,0.15)', color:'#34D399'  }  // rätt
+      : { background:'rgba(255,255,255,0.06)', color:'#64748B' }  // fel
+    : locked
+      ? { background:'#334155',  color:'#94A3B8' }                // låst, ej klart
+      : { background:'#F59E0B',  color:'#0F172A' }                // aktiv
+
+  // Visuell "expanded"-effekt enbart när kortet faktiskt kan öppnas
+  const showExpanded = expanded && canToggle
 
   return (
     <div
       className="rounded-xl overflow-hidden transition-all"
       style={{
-        background: locked ? 'rgba(255,255,255,0.01)' : expanded ? '#0F172A' : 'transparent',
-        border: `1px solid ${locked ? '#1E293B' : expanded ? '#334155' : 'transparent'}`,
+        background: showExpanded ? '#0F172A' : 'transparent',
+        border: `1px solid ${showExpanded ? '#334155' : '#1E293B'}`,
       }}
     >
-      {/* ─ Kollapsad rubrik ─ */}
       <button
-        onClick={() => !locked && onToggle(match.match_id)}
-        className="w-full flex flex-col gap-0.5 px-3 py-2.5 text-left"
+        onClick={() => canToggle && onToggle(match.match_id)}
+        className="w-full flex items-stretch text-left"
         style={{
-          background: expanded ? '#0F172A' : 'rgba(255,255,255,0.02)',
-          cursor: locked ? 'default' : 'pointer',
+          background: showExpanded ? '#0F172A' : 'rgba(255,255,255,0.025)',
+          cursor: canToggle ? 'pointer' : 'default',
+          minHeight: 64,
         }}
       >
-        {/* ── Rad 1: Lagnamn + badges ────────────────────────────────────────── */}
-        <div className="flex items-center gap-2 w-full min-w-0">
-
-          {/* Hemmalag – fast bredd, "vs" hamnar alltid i samma position */}
-          <div className="flex items-center gap-2 shrink-0 w-[108px] sm:w-[136px]">
-            {homeTeam ? <Flag iso2={homeTeam.iso2} size="sm" /> : <PlaceholderFlag />}
-            <span className="text-xs font-semibold truncate" style={{ color:'#F1F5F9' }}>
-              {homeLabel.main}
-            </span>
-          </div>
-
-          <span className="text-xs shrink-0" style={{ color:'#475569' }}>vs</span>
-
-          {/* Bortalag – fyller resterande utrymme och trunkeras vid behov */}
-          <div className="flex items-center gap-2 min-w-0 flex-1">
-            {awayTeam ? <Flag iso2={awayTeam.iso2} size="sm" /> : <PlaceholderFlag />}
-            <span className="text-xs font-semibold truncate" style={{ color:'#F1F5F9' }}>
-              {awayLabel.main}
-            </span>
-          </div>
-
-          {/* Riktigt resultat + tips-badge/låsikon + expandpil */}
-          <div className="flex items-center gap-1.5 shrink-0">
-            {hasResult && (
-              <span className="text-xs px-1.5 py-0.5 rounded-full font-mono"
-                    style={{
-                      background: correct ? 'rgba(52,211,153,0.12)' : 'rgba(255,255,255,0.06)',
-                      color:      correct ? '#34D399' : '#94A3B8',
-                    }}>
+        {/* ── Vänsterkolumn: datum/tid ELLER FT-resultat ── */}
+        <div
+          className="flex flex-col items-center justify-center shrink-0 px-2 gap-0.5"
+          style={{ width: 56, borderRight: '1px solid #1E293B' }}
+        >
+          {hasResult ? (
+            <>
+              <span className="text-[9px] font-semibold uppercase tracking-wide"
+                    style={{ color:'#475569' }}>FT</span>
+              <span className="text-base font-black font-mono leading-none"
+                    style={{ color:'#F1F5F9' }}>
                 {match.home_goals}–{match.away_goals}
               </span>
-            )}
-            {locked ? (
-              tip ? (
-                <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
-                      style={{ background:'#334155', color:'#94A3B8' }}>
-                  {tip}
-                </span>
-              ) : (
-                <span className="text-xs" style={{ color:'#475569' }}>🔒</span>
-              )
-            ) : (
-              tip ? (
-                <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
-                      style={{ background:'#F59E0B', color:'#0F172A' }}>
-                  {tip}
-                </span>
-              ) : null
-            )}
-            {!locked && (
-              <span className="text-xs ml-0.5" style={{ color:'#475569' }}>
-                {expanded ? '▲' : '▼'}
+            </>
+          ) : match.kickoff ? (
+            <>
+              <span className="text-[10px] font-medium leading-none"
+                    style={{ color:'#94A3B8' }}>
+                {fmtDay(match.kickoff)}
               </span>
-            )}
-          </div>
+              <span className="text-sm font-bold font-mono leading-none"
+                    style={{ color: locked ? '#475569' : '#F59E0B' }}>
+                {fmtClock(match.kickoff)}
+              </span>
+              {countdown && (
+                <span className="text-[9px] font-mono mt-0.5 px-1 rounded-full"
+                      style={{
+                        background: soon ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.10)',
+                        color:      soon ? '#F87171' : '#34D399',
+                        lineHeight: 1.6,
+                      }}>
+                  {soon ? '⚡' : ''}{countdown}
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="text-xs" style={{ color:'#334155' }}>–</span>
+          )}
         </div>
 
-        {/* ── Rad 2: Kickoff-tid + nedräkning ────────────────────────────────── */}
-        {/* Placeras på egen rad så att den aldrig konkurrerar om bredd med lagnamnen. */}
-        {/* pl-[28px] = flaggbredd(20) + gap(8) – aligns under hemmalags namn.       */}
-        {(kickoffStr || countdown) && (
-          <div className="flex items-center gap-1.5 pl-[28px]">
-            {countdown && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-mono"
-                    style={{
-                      background: soon ? 'rgba(239,68,68,0.15)' : 'rgba(52,211,153,0.10)',
-                      color:      soon ? '#F87171' : '#34D399',
-                    }}>
-                {soon ? '⚡ ' : ''}{countdown}
-              </span>
-            )}
-            {kickoffStr && (
-              <span className="text-xs font-mono" style={{ color: locked ? '#475569' : '#F59E0B' }}>
-                {kickoffStr}
-              </span>
-            )}
+        {/* ── Lagkolumn: hemmalag och bortalag staplade ── */}
+        <div className="flex-1 min-w-0 flex flex-col justify-center gap-1 px-3 py-2.5">
+
+          {/* Hemmalag */}
+          <div className="flex items-center gap-2 min-w-0">
+            {!isPlaceholder(match.home_team) && homeTeam
+              ? <Flag iso2={homeTeam.iso2} size="sm" />
+              : <PlaceholderFlag />}
+            <span
+              className="text-sm truncate"
+              style={{
+                color:      homeWon ? '#F1F5F9' : locked ? '#94A3B8' : '#F1F5F9',
+                fontWeight: homeWon ? 800 : 600,
+              }}
+            >
+              {homeLabel.main}
+            </span>
+            {homeWon && <span className="text-[10px] shrink-0" style={{ color:'#34D399' }}>✓</span>}
           </div>
-        )}
+
+          {/* Bortalag */}
+          <div className="flex items-center gap-2 min-w-0">
+            {!isPlaceholder(match.away_team) && awayTeam
+              ? <Flag iso2={awayTeam.iso2} size="sm" />
+              : <PlaceholderFlag />}
+            <span
+              className="text-sm truncate"
+              style={{
+                color:      awayWon ? '#F1F5F9' : locked ? '#94A3B8' : '#F1F5F9',
+                fontWeight: awayWon ? 800 : 600,
+              }}
+            >
+              {awayLabel.main}
+            </span>
+            {awayWon && <span className="text-[10px] shrink-0" style={{ color:'#34D399' }}>✓</span>}
+          </div>
+
+          {/* "Lag ej klara"-notering för ej fastställda matcher */}
+          {!teamsKnown && (
+            <span className="text-[10px] mt-0.5" style={{ color:'#475569' }}>
+              Lag ej klara – tippning stängt
+            </span>
+          )}
+        </div>
+
+        {/* ── Statuskolumn: tip-badge / låsikon / pil ── */}
+        <div className="flex flex-col items-center justify-center shrink-0 px-3 gap-1.5"
+             style={{ minWidth: 40 }}>
+          {tip ? (
+            <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
+                  style={tipStyle}>
+              {tip}
+            </span>
+          ) : locked ? (
+            <span className="text-xs" style={{ color:'#334155' }}>🔒</span>
+          ) : canToggle ? (
+            <span className="text-xs" style={{ color:'#475569' }}>
+              {showExpanded ? '▲' : '▼'}
+            </span>
+          ) : null}
+        </div>
       </button>
 
-      {/* ─ Expanderad del med 1X2-knappar (endast när ej låst) ─ */}
-      {expanded && !locked && (
+      {/* ── Expanderad: 1X2-knappar ── */}
+      {showExpanded && (
         <div className="px-3 pb-3 pt-1">
-          <TipButtons matchId={match.match_id} tip={tip} home={homeLabel.main} away={awayLabel.main} onTip={onTip} />
+          <TipButtons
+            matchId={match.match_id}
+            tip={tip}
+            home={homeLabel.main}
+            away={awayLabel.main}
+            onTip={onTip}
+          />
         </div>
       )}
     </div>
   )
 }
 
-// ─── Rundsektion – matcher grupperade efter "round"-etiketten ───────────────
+// ─── RoundSection ─────────────────────────────────────────────────────────────
 
-function RoundSection({ round, matches, tips, onTip, openMatch, onToggle, now }) {
-  const filled = matches.filter(m => tips[m.match_id]).length
+function RoundSection({ label, matches, tips, onTip, openMatch, onToggle, now }) {
+  const tippable = matches.filter(m => !isPlaceholder(m.home_team) && !isPlaceholder(m.away_team))
+  const filled   = tippable.filter(m => tips[m.match_id]).length
+  const total    = tippable.length
 
   return (
     <div className="rounded-2xl overflow-hidden" style={{ background:'#1E293B', border:'1px solid #334155' }}>
-      <div className="px-4 py-3 flex items-center justify-between"
+      <div className="px-4 py-2.5 flex items-center justify-between"
            style={{ background:'#0F172A', borderBottom:'1px solid #334155' }}>
-        <span className="font-bold text-sm" style={{ color:'#F59E0B' }}>{round}</span>
-        <span className="text-xs px-2 py-0.5 rounded-full font-medium"
-              style={{
-                background: filled === matches.length ? 'rgba(52,211,153,0.15)' : '#1E293B',
-                color:      filled === matches.length ? '#34D399' : '#64748B',
-                border:     `1px solid ${filled === matches.length ? '#34D399' : '#334155'}`,
-              }}>
-          {filled}/{matches.length}
-        </span>
+        <span className="font-bold text-sm" style={{ color:'#F59E0B' }}>{label}</span>
+        {total > 0 && (
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium"
+                style={{
+                  background: filled === total ? 'rgba(52,211,153,0.15)' : '#1E293B',
+                  color:      filled === total ? '#34D399' : '#64748B',
+                  border:     `1px solid ${filled === total ? '#34D399' : '#334155'}`,
+                }}>
+            {filled}/{total}
+          </span>
+        )}
       </div>
-
-      <div className="p-2 space-y-1">
+      <div className="p-2 space-y-1.5">
         {matches.map(m => (
-          <MatchRow
+          <MatchCard
             key={m.match_id}
             match={m}
             tip={tips[m.match_id] ?? null}
@@ -252,15 +308,16 @@ function RoundSection({ round, matches, tips, onTip, openMatch, onToggle, now })
   )
 }
 
-// ─── Huvudkomponent: Bracket (Slutspel) ───────────────────────────────────────
+// ─── Bracket (Huvudkomponent) ─────────────────────────────────────────────────
 
 export default function Bracket({ bracketTips, onTip }) {
-  const [matches,   setMatches]   = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState(null)
-  const [openMatch, setOpenMatch] = useState(null)
-  // Klocka som tickar var 30:e sekund – samma mönster som GroupStage – så att
-  // MatchRow automatiskt låses när kickoff-tiden passerar utan omladdning.
+  const [matches,     setMatches]     = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState(null)
+  const [openMatch,   setOpenMatch]   = useState(null)
+  const [activeRound, setActiveRound] = useState('R32')
+
+  // Klocka var 30:e sekund – samma mönster som GroupStage/BonusTab
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000)
@@ -281,7 +338,7 @@ export default function Bracket({ bracketTips, onTip }) {
 
   useEffect(() => { load() }, [load])
 
-  // Realtid: uppdatera direkt när admin sätter resultat eller status
+  // Realtid: uppdatera när admin sätter resultat
   useEffect(() => {
     const channel = supabase
       .channel('bracket_matches_changes')
@@ -292,27 +349,60 @@ export default function Bracket({ bracketTips, onTip }) {
 
   const toggle = useCallback(id => setOpenMatch(prev => prev === id ? null : id), [])
 
-  const filledCount = matches.filter(m => bracketTips[m.match_id]).length
+  // Gruppera matcher per round-id (redan sorterade av DB på sort_order)
+  const byRound = useMemo(() => {
+    const map = {}
+    for (const m of matches) {
+      const r = m.round || 'Övriga'
+      if (!map[r]) map[r] = []
+      map[r].push(m)
+    }
+    return map
+  }, [matches])
 
-  // Gruppera i sort_order-ordning per "round"-etikett (eller en gemensam lista om ingen finns)
-  const rounds = []
-  for (const m of matches) {
-    const label = m.round || 'Slutspel'
-    let bucket = rounds.find(r => r.label === label)
-    if (!bucket) { bucket = { label, matches: [] }; rounds.push(bucket) }
-    bucket.matches.push(m)
-  }
+  // Vilka rundor har matcher (inkl. extra)?
+  const availableRounds = ROUND_DEFS.filter(rd =>
+    (byRound[rd.id]?.length > 0) || (rd.extra && byRound[rd.extra]?.length > 0)
+  )
+
+  // Auto-välj runda vid första laddning: den äldsta rundan med olåsta tippningsbara matcher,
+  // annars den äldsta rundan med matcher alls.
+  useEffect(() => {
+    if (!matches.length) return
+    for (const rd of ROUND_DEFS) {
+      const ms = byRound[rd.id] ?? []
+      const hasOpen = ms.some(m =>
+        !isPlaceholder(m.home_team) && !isPlaceholder(m.away_team) &&
+        m.status !== 'finished' &&
+        !(m.kickoff && now >= new Date(m.kickoff))
+      )
+      if (hasOpen) { setActiveRound(rd.id); return }
+    }
+    for (const rd of ROUND_DEFS) {
+      if ((byRound[rd.id]?.length ?? 0) + (rd.extra ? (byRound[rd.extra]?.length ?? 0) : 0) > 0) {
+        setActiveRound(rd.id); return
+      }
+    }
+  }, [matches]) // now avsiktligt utelämnat – auto-select sker bara vid data-laddning
+
+  // Progress: bara tippningsbara matcher (ej platshållare)
+  const tippableAll = matches.filter(m => !isPlaceholder(m.home_team) && !isPlaceholder(m.away_team))
+  const tippedTotal = tippableAll.filter(m => bracketTips[m.match_id]).length
+
+  const activeDef = ROUND_DEFS.find(r => r.id === activeRound)
+  const activeMs  = byRound[activeRound] ?? []
+  const extraMs   = activeDef?.extra ? (byRound[activeDef.extra] ?? []) : []
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
 
+      {/* ─ Laddning / Fel / Tomt ─ */}
       {loading && (
         <div className="rounded-2xl px-4 py-6 text-center"
              style={{ background:'#1E293B', border:'1px solid #334155' }}>
           <p className="text-sm" style={{ color:'#64748B' }}>Laddar slutspelsmatcher...</p>
         </div>
       )}
-
       {error && (
         <div className="rounded-2xl px-4 py-3 flex items-center justify-between gap-3"
              style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)' }}>
@@ -323,7 +413,6 @@ export default function Bracket({ bracketTips, onTip }) {
           </button>
         </div>
       )}
-
       {!loading && !error && matches.length === 0 && (
         <div className="rounded-2xl px-4 py-6 text-center"
              style={{ background:'rgba(71,85,105,0.2)', border:'1px solid #334155' }}>
@@ -337,29 +426,71 @@ export default function Bracket({ bracketTips, onTip }) {
 
       {!loading && matches.length > 0 && (
         <>
+          {/* ─ Progress (totalt) ─ */}
           <div className="flex items-center justify-between px-1">
             <span className="text-xs" style={{ color:'#64748B' }}>Tippade slutspelsmatcher</span>
-            <span className="text-xs font-semibold" style={{ color: filledCount === matches.length ? '#34D399' : '#64748B' }}>
-              {filledCount} / {matches.length}
+            <span className="text-xs font-semibold"
+                  style={{ color: tippedTotal === tippableAll.length && tippableAll.length > 0
+                    ? '#34D399' : '#64748B' }}>
+              {tippedTotal} / {tippableAll.length}
             </span>
           </div>
 
-          {rounds.map(r => (
+          {/* ─ Rund-tabs (horisontellt scrollbar) ─ */}
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth:'none' }}>
+            {availableRounds.map(rd => {
+              const isActive = activeRound === rd.id
+              return (
+                <button
+                  key={rd.id}
+                  onClick={() => setActiveRound(rd.id)}
+                  className="px-4 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap shrink-0 transition-all"
+                  style={isActive
+                    ? { background:'#F59E0B', color:'#0F172A' }
+                    : { background:'#1E293B', color:'#64748B', border:'1px solid #334155' }}
+                >
+                  {rd.label}
+                </button>
+              )
+            })}
+          </div>
+
+          {/* ─ Bronsmatch (extra sektion under Final-pillen) ─ */}
+          {extraMs.length > 0 && (
             <RoundSection
-              key={r.label}
-              round={r.label}
-              matches={r.matches}
+              label={activeDef.extra}
+              matches={extraMs}
               tips={bracketTips}
               onTip={onTip}
               openMatch={openMatch}
               onToggle={toggle}
               now={now}
             />
-          ))}
+          )}
+
+          {/* ─ Matcherna i aktiv runda ─ */}
+          {activeMs.length > 0 ? (
+            <RoundSection
+              label={activeDef?.label ?? activeRound}
+              matches={activeMs}
+              tips={bracketTips}
+              onTip={onTip}
+              openMatch={openMatch}
+              onToggle={toggle}
+              now={now}
+            />
+          ) : (
+            <div className="rounded-2xl px-4 py-6 text-center"
+                 style={{ background:'rgba(71,85,105,0.15)', border:'1px solid #334155' }}>
+              <p className="text-sm" style={{ color:'#64748B' }}>
+                Matcherna i den här rundan är inte fastställda ännu.
+              </p>
+            </div>
+          )}
         </>
       )}
 
-      {/* Poängsystem */}
+      {/* ─ Poängsystem ─ */}
       <div className="rounded-2xl p-4 grid grid-cols-2 gap-3 text-center"
            style={{ background:'#1E293B', border:'1px solid #334155' }}>
         {[['3p','Rätt 1X2 (grupp + slutspel)','#34D399'],
