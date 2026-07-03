@@ -187,17 +187,20 @@ export default function AdminPanel({ demo = false, user = null, profile = null }
       return updateBracketGoal(matchId, { msg: '⚠ Ange giltiga mål (0 eller mer)' })
     }
     updateBracketGoal(matchId, { saving: true, msg: null })
-    const { error } = await supabase
-      .from('bracket_matches')
-      .update({ home_goals: homeG, away_goals: awayG, status: 'finished', updated_at: new Date().toISOString() })
-      .eq('match_id', matchId)
-    if (error) {
-      updateBracketGoal(matchId, { saving: false, msg: '⚠ ' + error.message })
+    const { data, error } = await supabase.rpc('admin_save_bracket_result', {
+      p_match_id:   matchId,
+      p_home_goals: homeG,
+      p_away_goals: awayG,
+    })
+    if (error || !data?.length) {
+      updateBracketGoal(matchId, {
+        saving: false,
+        msg: '⚠ Kunde inte spara – är du inloggad som admin?' + (error ? ` (${error.message})` : ''),
+      })
     } else {
+      const updated = data[0]
       updateBracketGoal(matchId, { saving: false, msg: '✓ Sparat!' })
-      setBracketMatches(prev => prev.map(m =>
-        m.match_id === matchId ? { ...m, home_goals: homeG, away_goals: awayG, status: 'finished' } : m
-      ))
+      setBracketMatches(prev => prev.map(m => m.match_id === matchId ? { ...m, ...updated } : m))
       setTimeout(() => updateBracketGoal(matchId, { msg: null }), 3000)
     }
   }
