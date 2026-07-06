@@ -74,7 +74,7 @@ function PlaceholderFlag() {
 
 // ─── TipButtons ──────────────────────────────────────────────────────────────
 
-function TipButtons({ matchId, tip, home, away, onTip }) {
+function TipButtons({ matchId, tip, home, away, onTip, locked = false }) {
   const opts = [
     { val:'1', label: `1  ${home}` },
     { val:'X', label: 'X'          },
@@ -82,81 +82,57 @@ function TipButtons({ matchId, tip, home, away, onTip }) {
   ]
   return (
     <div className="flex gap-2 pt-2 pb-1">
-      {opts.map(o => (
-        <button
-          key={o.val}
-          onClick={e => { e.stopPropagation(); onTip(matchId, tip === o.val ? null : o.val) }}
-          className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
-          style={{
-            background: tip === o.val ? '#F59E0B' : '#1E293B',
-            color:      tip === o.val ? '#0F172A' : '#64748B',
-            border:     `1.5px solid ${tip === o.val ? '#F59E0B' : '#334155'}`,
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
+      {opts.map(o => {
+        const sel = tip === o.val
+        return (
+          <button
+            key={o.val}
+            onClick={e => { if (locked) return; e.stopPropagation(); onTip(matchId, sel ? null : o.val) }}
+            disabled={locked}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
+            style={{
+              background: sel ? (locked ? 'rgba(245,158,11,0.35)' : '#F59E0B') : '#1E293B',
+              color:      sel ? (locked ? '#64748B'               : '#0F172A') : (locked ? '#1E293B' : '#64748B'),
+              border:     `1.5px solid ${sel ? (locked ? '#5A5A3A' : '#F59E0B') : (locked ? '#1E293B' : '#334155')}`,
+              cursor:     locked ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
 
 // ─── TipButtonsPenalty – enbart 1/2, ingen X (straffar kan ej sluta lika) ───
 
-function TipButtonsPenalty({ matchId, tip, home, away, onTip }) {
+function TipButtonsPenalty({ matchId, tip, home, away, onTip, locked = false }) {
   const opts = [
     { val:'1', label: `1  ${home}` },
     { val:'2', label: `${away}  2` },
   ]
   return (
     <div className="flex gap-2">
-      {opts.map(o => (
-        <button
-          key={o.val}
-          onClick={e => { e.stopPropagation(); onTip(matchId, tip === o.val ? null : o.val) }}
-          className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
-          style={{
-            background: tip === o.val ? '#F59E0B' : '#1E293B',
-            color:      tip === o.val ? '#0F172A' : '#64748B',
-            border:     `1.5px solid ${tip === o.val ? '#F59E0B' : '#334155'}`,
-          }}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ─── TipResultRow – visa tips + rätt/fel när matchen är avgjord ─────────────
-
-function TipResultRow({ label, tip, result }) {
-  if (!tip) return null
-  const decided = result != null
-  const correct = decided && tip === result
-  return (
-    <div className="flex items-center justify-between py-0.5">
-      <span className="text-[10px] uppercase tracking-wider font-semibold"
-            style={{ color:'#475569' }}>
-        {label}
-      </span>
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-bold px-2 py-0.5 rounded-lg"
-              style={{
-                background: !decided ? 'rgba(255,255,255,0.05)'
-                  : correct ? 'rgba(52,211,153,0.15)'
-                  : 'rgba(248,113,113,0.12)',
-                color: !decided ? '#94A3B8' : correct ? '#34D399' : '#F87171',
-              }}>
-          {tip}
-        </span>
-        {decided ? (
-          <span className="text-[10px]" style={{ color: correct ? '#34D399' : '#F87171' }}>
-            {correct ? '✓' : `✗ (${result})`}
-          </span>
-        ) : (
-          <span className="text-[10px]" style={{ color:'#334155' }}>— ej avgjort</span>
-        )}
-      </div>
+      {opts.map(o => {
+        const sel = tip === o.val
+        return (
+          <button
+            key={o.val}
+            onClick={e => { if (locked) return; e.stopPropagation(); onTip(matchId, sel ? null : o.val) }}
+            disabled={locked}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95"
+            style={{
+              background: sel ? (locked ? 'rgba(245,158,11,0.35)' : '#F59E0B') : '#1E293B',
+              color:      sel ? (locked ? '#64748B'               : '#0F172A') : (locked ? '#1E293B' : '#64748B'),
+              border:     `1.5px solid ${sel ? (locked ? '#5A5A3A' : '#F59E0B') : (locked ? '#1E293B' : '#334155')}`,
+              cursor:     locked ? 'not-allowed' : 'pointer',
+            }}
+          >
+            {o.label}
+          </button>
+        )
+      })}
     </div>
   )
 }
@@ -174,8 +150,8 @@ function MatchCard({ match, tip, etTip, penTip, onTip, expanded, onToggle, now }
   const correct         = hasResult && !!tip && tip === match.result
   const teamsKnown      = !isPlaceholder(match.home_team) && !isPlaceholder(match.away_team)
   const isKnockoutWithOT = KNOCKOUT_OT_ROUNDS.has(match.round)
-  // Tillåt expansion av låsta KV+-matcher för att visa tips/resultat-jämförelse
-  const canToggle       = teamsKnown && (!locked || (isKnockoutWithOT && hasResult))
+  // Tillåt expansion av alla låsta OT-rundor – oavsett om resultatet är känt
+  const canToggle       = teamsKnown && (!locked || isKnockoutWithOT)
   const countdown       = !locked && match.kickoff ? getCountdown(match.kickoff) : null
   const soon            = !locked && match.kickoff ? isMatchSoon(match.kickoff, 60) : false
 
@@ -334,15 +310,75 @@ function MatchCard({ match, tip, etTip, penTip, onTip, expanded, onToggle, now }
       {showExpanded && (
         <div className="px-3 pb-3 pt-2 space-y-3">
           {viewOnly ? (
-            /* ── View-only: tips + rätt/fel per sektion (låst KV+) ── */
-            <div className="space-y-1.5">
-              <TipResultRow label="Fulltid"  tip={tip}    result={match.result}     />
-              <TipResultRow label="Övertid"  tip={etTip}  result={match.et_result}  />
-              <TipResultRow label="Straffar" tip={penTip}  result={match.pen_result} />
-              {!tip && !etTip && !penTip && (
-                <p className="text-xs text-center" style={{ color:'#475569' }}>Inget tips lämnades</p>
-              )}
-            </div>
+            /* ── Låst: disabled knappar med markerat val + ev. rätt/fel ── */
+            <>
+              {/* Fulltid */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider"
+                     style={{ color:'#64748B' }}>Fulltid</p>
+                  {match.result && tip && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{
+                            background: tip === match.result ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.12)',
+                            color:      tip === match.result ? '#34D399' : '#F87171',
+                          }}>
+                      {tip === match.result ? '✓ Rätt' : `✗ Fel (${match.result})`}
+                    </span>
+                  )}
+                </div>
+                <TipButtons matchId={match.match_id} tip={tip}
+                            home={homeLabel.main} away={awayLabel.main}
+                            onTip={() => {}} locked />
+                {!tip && <p className="text-[10px] text-center mt-1" style={{ color:'#475569' }}>Ingen gissning</p>}
+              </div>
+
+              <div style={{ height:1, background:'#1E293B' }} />
+
+              {/* Övertid */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider"
+                     style={{ color:'#64748B' }}>Övertid</p>
+                  {match.et_result && etTip && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{
+                            background: etTip === match.et_result ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.12)',
+                            color:      etTip === match.et_result ? '#34D399' : '#F87171',
+                          }}>
+                      {etTip === match.et_result ? '✓ Rätt' : `✗ Fel (${match.et_result})`}
+                    </span>
+                  )}
+                </div>
+                <TipButtons matchId={match.match_id} tip={etTip}
+                            home={homeLabel.main} away={awayLabel.main}
+                            onTip={() => {}} locked />
+                {!etTip && <p className="text-[10px] text-center mt-1" style={{ color:'#475569' }}>Ingen gissning</p>}
+              </div>
+
+              <div style={{ height:1, background:'#1E293B' }} />
+
+              {/* Straffar */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider"
+                     style={{ color:'#64748B' }}>Straffar</p>
+                  {match.pen_result && penTip && (
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
+                          style={{
+                            background: penTip === match.pen_result ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.12)',
+                            color:      penTip === match.pen_result ? '#34D399' : '#F87171',
+                          }}>
+                      {penTip === match.pen_result ? '✓ Rätt' : `✗ Fel (${match.pen_result})`}
+                    </span>
+                  )}
+                </div>
+                <TipButtonsPenalty matchId={match.match_id} tip={penTip}
+                                   home={homeLabel.main} away={awayLabel.main}
+                                   onTip={() => {}} locked />
+                {!penTip && <p className="text-[10px] text-center mt-1" style={{ color:'#475569' }}>Ingen gissning</p>}
+              </div>
+            </>
           ) : (
             /* ── Edit-läge: tippningsknappar ── */
             <>
