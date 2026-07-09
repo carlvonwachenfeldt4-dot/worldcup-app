@@ -140,83 +140,84 @@ function BonusTab({ user }) {
               )}
             </div>
 
-            {/* ─ Alternativknappar ─ */}
+            {/* ─ Alternativknappar: en sektion per points-nivå ─ */}
             {(() => {
-              const fiveP = group.options.filter(o => o.option_number <= 4)
-              const tenP  = group.options.filter(o => o.option_number >= 5)
+              // Gruppera dynamiskt på points-kolumnen, sorterat stigande
+              const minPoints = Math.min(...group.options.map(o => o.points ?? 5))
+              const pointGroups = [...new Set(group.options.map(o => o.points ?? 5))]
+                .sort((a, b) => a - b)
+                .map(pts => ({
+                  points:  pts,
+                  options: group.options.filter(o => (o.points ?? 5) === pts),
+                }))
+              const multiLevel = pointGroups.length > 1
 
-              const renderOptions = (opts) => opts.map(opt => {
-                const sel      = localPicks[group.groupId] === opt.option_number
-                const disabled = locked || !user
+              return pointGroups.map((pg, pgIdx) => {
+                const isHigher = pg.points > minPoints
                 return (
-                  <button
-                    key={opt.id}
-                    onClick={() => !disabled && pick(group.groupId, opt.option_number)}
-                    disabled={disabled}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '0.625rem 0.75rem', borderRadius: 12,
-                      cursor: disabled ? 'not-allowed' : 'pointer',
-                      textAlign: 'left', width: '100%',
-                      opacity: locked && !sel ? 0.45 : 1,
-                      background: sel ? 'rgba(245,158,11,0.08)' : 'transparent',
-                      border: `1.5px solid ${sel ? '#F59E0B' : '#334155'}`,
-                      transition: 'opacity 0.2s',
-                    }}
-                  >
-                    <span style={{ fontSize: '0.875rem', fontWeight: 900, width: 20, textAlign: 'center', flexShrink: 0, color: sel ? '#F59E0B' : '#475569' }}>
-                      {opt.option_number}
-                    </span>
-                    <span style={{ fontSize: '0.875rem', flex: 1, color: sel ? '#F1F5F9' : (locked ? '#64748B' : '#94A3B8') }}>
-                      {opt.option_text}
-                    </span>
-                    {sel && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ADE80', flexShrink: 0 }}>✓ Valt</span>}
-                  </button>
+                  <div key={pg.points}>
+                    {/* Separator mellan sektioner */}
+                    {pgIdx > 0 && <div style={{ height: 1, background: '#334155' }} />}
+
+                    {/* Sektionsrubrik (visas bara om det finns flera nivåer) */}
+                    {multiLevel && (
+                      <div style={{
+                        padding: '0.5rem 1rem',
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        background: isHigher ? 'rgba(245,158,11,0.05)' : 'transparent',
+                        borderBottom: '1px solid #334155',
+                      }}>
+                        <span style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748B' }}>
+                          {pg.points} poäng
+                        </span>
+                        {isHigher && (
+                          <span style={{ fontSize: '0.6rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: 'rgba(245,158,11,0.18)', color: '#F59E0B' }}>
+                            {pg.points}p
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Alternativknappar – omnumrerade 1,2,3,... inom sektionen */}
+                    <div style={{
+                      padding: '0.75rem',
+                      display: 'flex', flexDirection: 'column', gap: 8,
+                      background: isHigher ? 'rgba(245,158,11,0.02)' : 'transparent',
+                    }}>
+                      {pg.options.map((opt, i) => {
+                        const displayNum = i + 1
+                        const sel        = localPicks[group.groupId] === opt.option_number
+                        const disabled   = locked || !user
+                        return (
+                          <button
+                            key={opt.id}
+                            onClick={() => !disabled && pick(group.groupId, opt.option_number)}
+                            disabled={disabled}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 12,
+                              padding: '0.625rem 0.75rem', borderRadius: 12,
+                              cursor: disabled ? 'not-allowed' : 'pointer',
+                              textAlign: 'left', width: '100%',
+                              opacity: locked && !sel ? 0.45 : 1,
+                              background: sel ? 'rgba(245,158,11,0.08)' : 'transparent',
+                              border: `1.5px solid ${sel ? '#F59E0B' : '#334155'}`,
+                              transition: 'opacity 0.2s',
+                            }}
+                          >
+                            <span style={{ fontSize: '0.875rem', fontWeight: 900, width: 20, textAlign: 'center', flexShrink: 0, color: sel ? '#F59E0B' : '#475569' }}>
+                              {displayNum}
+                            </span>
+                            <span style={{ fontSize: '0.875rem', flex: 1, color: sel ? '#F1F5F9' : (locked ? '#64748B' : '#94A3B8') }}>
+                              {opt.option_text}
+                            </span>
+                            {sel && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ADE80', flexShrink: 0 }}>✓ Valt</span>}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
                 )
               })
-
-              if (tenP.length === 0) {
-                // Äldre fråga utan 10p-alternativ – flat lista som tidigare
-                return (
-                  <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {renderOptions(fiveP)}
-                  </div>
-                )
-              }
-
-              // Tvåspalts-layout: 5p vänster/överst, 10p höger/under
-              return (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ padding: '0.75rem' }}>
-
-                  {/* ── 5p-spalten ── */}
-                  <div>
-                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-                      <span style={{ fontSize:'0.65rem', fontWeight:800, letterSpacing:'0.08em', textTransform:'uppercase', color:'#64748B' }}>
-                        5 poäng
-                      </span>
-                    </div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                      {renderOptions(fiveP)}
-                    </div>
-                  </div>
-
-                  {/* ── 10p-spalten (amber-accent) ── */}
-                  <div style={{ background:'rgba(245,158,11,0.04)', border:'1px solid rgba(245,158,11,0.15)', borderRadius:12, padding:8 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-                      <span style={{ fontSize:'0.65rem', fontWeight:800, letterSpacing:'0.08em', textTransform:'uppercase', color:'#64748B' }}>
-                        10 poäng
-                      </span>
-                      <span style={{ fontSize:'0.6rem', fontWeight:700, padding:'1px 6px', borderRadius:99, background:'rgba(245,158,11,0.18)', color:'#F59E0B' }}>
-                        10p
-                      </span>
-                    </div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
-                      {renderOptions(tenP)}
-                    </div>
-                  </div>
-
-                </div>
-              )
             })()}
 
             {/* ─ Footer ─ */}
