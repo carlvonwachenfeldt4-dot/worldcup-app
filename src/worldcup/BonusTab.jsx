@@ -45,7 +45,7 @@ function BonusTab({ user }) {
     async function load() {
       const [{ data: qs }, picksRes] = await Promise.all([
         supabase.from('bonus_questions')
-          .select('id, match_label, option_number, option_text, lock_time')
+          .select('id, match_label, option_number, option_text, points, lock_time')
           .order('match_label').order('option_number'),
         supabase.from('bonus_picks')
           .select('bonus_question_id, chosen_option')
@@ -141,11 +141,13 @@ function BonusTab({ user }) {
             </div>
 
             {/* ─ Alternativknappar ─ */}
-            <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {group.options.map(opt => {
+            {(() => {
+              const fiveP = group.options.filter(o => o.option_number <= 4)
+              const tenP  = group.options.filter(o => o.option_number >= 5)
+
+              const renderOptions = (opts) => opts.map(opt => {
                 const sel      = localPicks[group.groupId] === opt.option_number
                 const disabled = locked || !user
-
                 return (
                   <button
                     key={opt.id}
@@ -171,8 +173,51 @@ function BonusTab({ user }) {
                     {sel && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ADE80', flexShrink: 0 }}>✓ Valt</span>}
                   </button>
                 )
-              })}
-            </div>
+              })
+
+              if (tenP.length === 0) {
+                // Äldre fråga utan 10p-alternativ – flat lista som tidigare
+                return (
+                  <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {renderOptions(fiveP)}
+                  </div>
+                )
+              }
+
+              // Tvåspalts-layout: 5p vänster/överst, 10p höger/under
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" style={{ padding: '0.75rem' }}>
+
+                  {/* ── 5p-spalten ── */}
+                  <div>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                      <span style={{ fontSize:'0.65rem', fontWeight:800, letterSpacing:'0.08em', textTransform:'uppercase', color:'#64748B' }}>
+                        5 poäng
+                      </span>
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                      {renderOptions(fiveP)}
+                    </div>
+                  </div>
+
+                  {/* ── 10p-spalten (amber-accent) ── */}
+                  <div style={{ background:'rgba(245,158,11,0.04)', border:'1px solid rgba(245,158,11,0.15)', borderRadius:12, padding:8 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
+                      <span style={{ fontSize:'0.65rem', fontWeight:800, letterSpacing:'0.08em', textTransform:'uppercase', color:'#64748B' }}>
+                        10 poäng
+                      </span>
+                      <span style={{ fontSize:'0.6rem', fontWeight:700, padding:'1px 6px', borderRadius:99, background:'rgba(245,158,11,0.18)', color:'#F59E0B' }}>
+                        10p
+                      </span>
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                      {renderOptions(tenP)}
+                    </div>
+                  </div>
+
+                </div>
+              )
+            })()}
 
             {/* ─ Footer ─ */}
             {!user && (
