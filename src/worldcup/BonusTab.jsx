@@ -170,11 +170,13 @@ function BonusTab({ user }) {
                         <span style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748B' }}>
                           {pg.points} poäng
                         </span>
-                        {isHigher && (
-                          <span style={{ fontSize: '0.6rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: 'rgba(245,158,11,0.18)', color: '#F59E0B' }}>
-                            {pg.points}p
-                          </span>
-                        )}
+                        <span style={{
+                          fontSize: '0.6rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99,
+                          background: isHigher ? 'rgba(245,158,11,0.18)' : 'rgba(59,130,246,0.18)',
+                          color:      isHigher ? '#F59E0B'               : '#93C5FD',
+                        }}>
+                          {pg.points}p
+                        </span>
                       </div>
                     )}
 
