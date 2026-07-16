@@ -415,22 +415,25 @@ export async function loadBonusPicks(userId) {
   return data ?? []
 }
 
-// RLS requirement for bonus_picks:
-//   INSERT: (user_id = auth.uid())
-//   UPDATE: (user_id = auth.uid())
-//   SELECT: (user_id = auth.uid())
-// unique constraint required: (user_id, bonus_question_id)
+// Constraint: UNIQUE (user_id, bonus_question_id, chosen_option) — max 2 rader per fråga.
+// INSERT av en ny rad; anroparen ansvarar för att max-2-regeln inte överskrids.
 export async function saveBonusPick(userId, bonusQuestionId, chosenOption) {
-  console.log('[supabase] saveBonusPick →', { userId, bonusQuestionId, chosenOption })
   const { data, error } = await supabase
     .from('bonus_picks')
-    .upsert(
-      { user_id: userId, bonus_question_id: bonusQuestionId, chosen_option: chosenOption },
-      { onConflict: 'user_id,bonus_question_id' }
-    )
+    .insert({ user_id: userId, bonus_question_id: bonusQuestionId, chosen_option: chosenOption })
     .select()
-  console.log('[supabase] saveBonusPick ←', { data, error })
   return { data, error }
+}
+
+// Ta bort ett specifikt val (matchar på alla tre kolumnerna).
+export async function deleteBonusPick(userId, bonusQuestionId, chosenOption) {
+  const { error } = await supabase
+    .from('bonus_picks')
+    .delete()
+    .eq('user_id', userId)
+    .eq('bonus_question_id', bonusQuestionId)
+    .eq('chosen_option', chosenOption)
+  return { error }
 }
 
 export async function setBonusCorrectOption(matchLabel, correctOption) {

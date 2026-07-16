@@ -15,11 +15,14 @@ function fmtTime(ts) {
   })
 }
 
+const MAX_PICKS = 2
+
 function BonusTab({ user }) {
   const [groups,     setGroups]     = useState([])
-  const [localPicks, setLocalPicks] = useState({})  // { bonus_question_id: chosen_option }
+  const [localPicks, setLocalPicks] = useState({})  // { groupId: Set<chosen_option> }
   const [loading,    setLoading]    = useState(true)
-  const [saving,     setSaving]     = useState({})  // { bonus_question_id: bool }
+  const [saving,     setSaving]     = useState({})  // { groupId: bool }
+  const [maxVal,     setMaxVal]     = useState({})  // { groupId: bool } — "Max 2 val"-feedback
   const [err,        setErr]        = useState(null)
   const hasFetched = useRef(false)
 
@@ -65,8 +68,12 @@ function BonusTab({ user }) {
           lockTime: sorted[0].lock_time ?? null,
         }
       }))
+      // Flera rader per grupp möjliga – samla i Set per groupId
       const pm = {}
-      for (const p of picksRes.data ?? []) pm[p.bonus_question_id] = p.chosen_option
+      for (const p of picksRes.data ?? []) {
+        if (!pm[p.bonus_question_id]) pm[p.bonus_question_id] = new Set()
+        pm[p.bonus_question_id].add(p.chosen_option)
+      }
       setLocalPicks(pm)
     }
     load().catch(e => setErr(e.message)).finally(() => setLoading(false))
@@ -74,18 +81,51 @@ function BonusTab({ user }) {
 
   async function pick(groupId, optionNum) {
     if (!user?.id) return
-    setSaving(p => ({ ...p, [groupId]: true }))
-    const { error } = await supabase
-      .from('bonus_picks')
-      .upsert(
-        { user_id: user.id, bonus_question_id: groupId, chosen_option: optionNum },
-        { onConflict: 'user_id,bonus_question_id' }
-      )
-    if (error) {
-      setErr(error.message)
-    } else {
-      setLocalPicks(prev => ({ ...prev, [groupId]: optionNum }))
+    const current    = localPicks[groupId] ?? new Set()
+    const alreadySel = current.has(optionNum)
+
+    if (!alreadySel && current.size >= MAX_PICKS) {
+      // Tredje klick – visa diskret feedback och avbryt
+      setMaxVal(p => ({ ...p, [groupId]: true }))
+      setTimeout(() => setMaxVal(p => ({ ...p, [groupId]: false })), 2000)
+      return
     }
+
+    setSaving(p => ({ ...p, [groupId]: true }))
+
+    if (alreadySel) {
+      // Avmarkera → DELETE exakt denna rad
+      const { error } = await supabase
+        .from('bonus_picks')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('bonus_question_id', groupId)
+        .eq('chosen_option', optionNum)
+      if (error) {
+        setErr(error.message)
+      } else {
+        setLocalPicks(prev => {
+          const next = new Set(prev[groupId])
+          next.delete(optionNum)
+          return { ...prev, [groupId]: next }
+        })
+      }
+    } else {
+      // Markera → INSERT ny rad
+      const { error } = await supabase
+        .from('bonus_picks')
+        .insert({ user_id: user.id, bonus_question_id: groupId, chosen_option: optionNum })
+      if (error) {
+        setErr(error.message)
+      } else {
+        setLocalPicks(prev => {
+          const next = new Set(prev[groupId])
+          next.add(optionNum)
+          return { ...prev, [groupId]: next }
+        })
+      }
+    }
+
     setSaving(p => ({ ...p, [groupId]: false }))
   }
 
@@ -119,7 +159,8 @@ function BonusTab({ user }) {
       {groups.map(group => {
         const locked     = group.lockTime != null && now >= new Date(group.lockTime)
         const lockStr    = fmtTime(group.lockTime)
-        const hasPick    = localPicks[group.groupId] != null
+        const picks      = localPicks[group.groupId] ?? new Set()
+        const hasPick    = picks.size > 0
 
         return (
           <div key={group.label} style={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 16, overflow: 'hidden' }}>
@@ -128,7 +169,12 @@ function BonusTab({ user }) {
             <div style={{ background: '#0F172A', padding: '0.75rem 1rem', borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#F1F5F9' }}>{group.label}</span>
-                {saving[group.groupId] && <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Sparar...</span>}
+                {saving[group.groupId]
+                  ? <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Sparar...</span>
+                  : maxVal[group.groupId]
+                    ? <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#F59E0B' }}>Max 2 val</span>
+                    : !locked && <span style={{ fontSize: '0.7rem', color: '#475569' }}>{picks.size}/{MAX_PICKS} valda</span>
+                }
               </div>
 
               {/* Lock-tid – amber = öppen, grå + 🔒 = stängd */}
@@ -188,7 +234,7 @@ function BonusTab({ user }) {
                     }}>
                       {pg.options.map((opt, i) => {
                         const displayNum = i + 1
-                        const sel        = localPicks[group.groupId] === opt.option_number
+                        const sel        = picks.has(opt.option_number)
                         const disabled   = locked || !user
                         return (
                           <button
