@@ -25,6 +25,10 @@ function BonusTab({ user }) {
   const [maxVal,     setMaxVal]     = useState({})  // { groupId: bool } — "Max 2 val"-feedback
   const [err,        setErr]        = useState(null)
   const hasFetched = useRef(false)
+  // Ref som alltid speglar senaste localPicks, synkront uppdaterad inuti state-settern.
+  // Löser stale-closure-buggen: pick() läser från ref, inte från renderclosuren, så att
+  // max-2-kolls inte triggar med gamla värden innan nästa render hunnit ske.
+  const localPicksRef = useRef({})
 
   // Klocka som tickar var 30:e sekund – samma mönster som GroupStage/Bracket –
   // så att låsningen sker reaktivt utan att sidan behöver laddas om.
@@ -74,6 +78,7 @@ function BonusTab({ user }) {
         if (!pm[p.bonus_question_id]) pm[p.bonus_question_id] = new Set()
         pm[p.bonus_question_id].add(p.chosen_option)
       }
+      localPicksRef.current = pm   // synk ref innan render
       setLocalPicks(pm)
     }
     load().catch(e => setErr(e.message)).finally(() => setLoading(false))
@@ -81,11 +86,13 @@ function BonusTab({ user }) {
 
   async function pick(groupId, optionNum) {
     if (!user?.id) return
-    const current    = localPicks[groupId] ?? new Set()
+
+    // Läs från ref – inte från renderclosuren – för att alltid se senaste state
+    // även om React ännu inte hunnit re-rendera sedan föregående pick()-anrop.
+    const current    = localPicksRef.current[groupId] ?? new Set()
     const alreadySel = current.has(optionNum)
 
     if (!alreadySel && current.size >= MAX_PICKS) {
-      // Tredje klick – visa diskret feedback och avbryt
       setMaxVal(p => ({ ...p, [groupId]: true }))
       setTimeout(() => setMaxVal(p => ({ ...p, [groupId]: false })), 2000)
       return
@@ -102,12 +109,16 @@ function BonusTab({ user }) {
         .eq('bonus_question_id', groupId)
         .eq('chosen_option', optionNum)
       if (error) {
-        setErr(error.message)
+        setErr('Kunde inte avmarkera: ' + error.message)
       } else {
+        // Uppdatera ref synkront inuti state-settern så nästa pick()-anrop
+        // ser det korrekta antalet valda, även före nästa render.
         setLocalPicks(prev => {
           const next = new Set(prev[groupId])
           next.delete(optionNum)
-          return { ...prev, [groupId]: next }
+          const result = { ...prev, [groupId]: next }
+          localPicksRef.current = result
+          return result
         })
       }
     } else {
@@ -116,12 +127,14 @@ function BonusTab({ user }) {
         .from('bonus_picks')
         .insert({ user_id: user.id, bonus_question_id: groupId, chosen_option: optionNum })
       if (error) {
-        setErr(error.message)
+        setErr('Kunde inte spara: ' + error.message)
       } else {
         setLocalPicks(prev => {
           const next = new Set(prev[groupId])
           next.add(optionNum)
-          return { ...prev, [groupId]: next }
+          const result = { ...prev, [groupId]: next }
+          localPicksRef.current = result
+          return result
         })
       }
     }
