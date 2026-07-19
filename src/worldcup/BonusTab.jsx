@@ -1,37 +1,23 @@
 import { useState, useEffect, useRef, memo } from 'react'
 import { supabase } from '../lib/supabase'
 
-// Formaterar en ISO-timestamp till svensk lokal tid, t.ex. "tis 30 jun, 23:00".
-// Samma mönster som formatKickoff i Bracket.jsx.
 function fmtTime(ts) {
   if (!ts) return null
   return new Date(ts).toLocaleString('sv-SE', {
-    weekday:  'short',
-    day:      'numeric',
-    month:    'short',
-    hour:     '2-digit',
-    minute:   '2-digit',
+    weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit',
     timeZone: 'Europe/Stockholm',
   })
 }
 
-const MAX_PICKS = 2
-
 function BonusTab({ user }) {
   const [groups,     setGroups]     = useState([])
-  const [localPicks, setLocalPicks] = useState({})  // { groupId: Set<chosen_option> }
+  const [localPicks, setLocalPicks] = useState({})  // { groupId: chosen_option | null }
   const [loading,    setLoading]    = useState(true)
   const [saving,     setSaving]     = useState({})  // { groupId: bool }
-  const [maxVal,     setMaxVal]     = useState({})  // { groupId: bool } — "Max 2 val"-feedback
   const [err,        setErr]        = useState(null)
   const hasFetched = useRef(false)
-  // Ref som alltid speglar senaste localPicks, synkront uppdaterad inuti state-settern.
-  // Löser stale-closure-buggen: pick() läser från ref, inte från renderclosuren, så att
-  // max-2-kolls inte triggar med gamla värden innan nästa render hunnit ske.
-  const localPicksRef = useRef({})
 
-  // Klocka som tickar var 30:e sekund – samma mönster som GroupStage/Bracket –
-  // så att låsningen sker reaktivt utan att sidan behöver laddas om.
   const [now, setNow] = useState(() => new Date())
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000)
@@ -65,20 +51,10 @@ function BonusTab({ user }) {
       }
       setGroups([...map.entries()].map(([label, opts]) => {
         const sorted = [...opts].sort((a, b) => a.option_number - b.option_number)
-        return {
-          label,
-          options:  sorted,
-          groupId:  sorted[0].id,
-          lockTime: sorted[0].lock_time ?? null,
-        }
+        return { label, options: sorted, groupId: sorted[0].id, lockTime: sorted[0].lock_time ?? null }
       }))
-      // Flera rader per grupp möjliga – samla i Set per groupId
       const pm = {}
-      for (const p of picksRes.data ?? []) {
-        if (!pm[p.bonus_question_id]) pm[p.bonus_question_id] = new Set()
-        pm[p.bonus_question_id].add(p.chosen_option)
-      }
-      localPicksRef.current = pm   // synk ref innan render
+      for (const p of picksRes.data ?? []) pm[p.bonus_question_id] = p.chosen_option
       setLocalPicks(pm)
     }
     load().catch(e => setErr(e.message)).finally(() => setLoading(false))
@@ -86,59 +62,36 @@ function BonusTab({ user }) {
 
   async function pick(groupId, optionNum) {
     if (!user?.id) return
+    const currentOpt = localPicks[groupId]
+    const alreadySel = currentOpt === optionNum
+    setSaving(p => ({ ...p, [groupId]: true }))
 
-    // Läs från ref – inte från renderclosuren – för att alltid se senaste state
-    // även om React ännu inte hunnit re-rendera sedan föregående pick()-anrop.
-    const current    = localPicksRef.current[groupId] ?? new Set()
-    const alreadySel = current.has(optionNum)
+    // DELETE all existing rows for this question first (no ON CONFLICT anywhere)
+    const { error: delErr } = await supabase
+      .from('bonus_picks')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('bonus_question_id', groupId)
 
-    if (!alreadySel && current.size >= MAX_PICKS) {
-      setMaxVal(p => ({ ...p, [groupId]: true }))
-      setTimeout(() => setMaxVal(p => ({ ...p, [groupId]: false })), 2000)
+    if (delErr) {
+      setErr(delErr.message)
+      setSaving(p => ({ ...p, [groupId]: false }))
       return
     }
 
-    setSaving(p => ({ ...p, [groupId]: true }))
-
     if (alreadySel) {
-      // Avmarkera → DELETE exakt denna rad
-      const { error } = await supabase
-        .from('bonus_picks')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('bonus_question_id', groupId)
-        .eq('chosen_option', optionNum)
-      if (error) {
-        setErr('Kunde inte avmarkera: ' + error.message)
-      } else {
-        // Uppdatera ref synkront inuti state-settern så nästa pick()-anrop
-        // ser det korrekta antalet valda, även före nästa render.
-        setLocalPicks(prev => {
-          const next = new Set(prev[groupId])
-          next.delete(optionNum)
-          const result = { ...prev, [groupId]: next }
-          localPicksRef.current = result
-          return result
-        })
-      }
+      // Klick på redan valt = avmarkering, raden är redan borttagen ovan
+      setLocalPicks(prev => ({ ...prev, [groupId]: null }))
     } else {
-      // Markera → INSERT ny rad
-      const { error } = await supabase
+      const { error: insErr } = await supabase
         .from('bonus_picks')
         .insert({ user_id: user.id, bonus_question_id: groupId, chosen_option: optionNum })
-      if (error) {
-        setErr('Kunde inte spara: ' + error.message)
+      if (insErr) {
+        setErr(insErr.message)
       } else {
-        setLocalPicks(prev => {
-          const next = new Set(prev[groupId])
-          next.add(optionNum)
-          const result = { ...prev, [groupId]: next }
-          localPicksRef.current = result
-          return result
-        })
+        setLocalPicks(prev => ({ ...prev, [groupId]: optionNum }))
       }
     }
-
     setSaving(p => ({ ...p, [groupId]: false }))
   }
 
@@ -170,27 +123,26 @@ function BonusTab({ user }) {
       )}
 
       {groups.map(group => {
-        const locked     = group.lockTime != null && now >= new Date(group.lockTime)
-        const lockStr    = fmtTime(group.lockTime)
-        const picks      = localPicks[group.groupId] ?? new Set()
-        const hasPick    = picks.size > 0
+        const locked  = group.lockTime != null && now >= new Date(group.lockTime)
+        const lockStr = fmtTime(group.lockTime)
+        const hasPick = localPicks[group.groupId] != null
+
+        // Dynamisk gruppering på points-kolumnen
+        const minPoints  = Math.min(...group.options.map(o => o.points ?? 5))
+        const pointGroups = [...new Set(group.options.map(o => o.points ?? 5))]
+          .sort((a, b) => a - b)
+          .map(pts => ({ points: pts, options: group.options.filter(o => (o.points ?? 5) === pts) }))
+        const multiLevel = pointGroups.length > 1
 
         return (
           <div key={group.label} style={{ background: '#1E293B', border: '1px solid #334155', borderRadius: 16, overflow: 'hidden' }}>
 
-            {/* ─ Rubrikrad ─ */}
+            {/* Rubrikrad */}
             <div style={{ background: '#0F172A', padding: '0.75rem 1rem', borderBottom: '1px solid #334155', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: '0.875rem', fontWeight: 700, color: '#F1F5F9' }}>{group.label}</span>
-                {saving[group.groupId]
-                  ? <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Sparar...</span>
-                  : maxVal[group.groupId]
-                    ? <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#F59E0B' }}>Max 2 val</span>
-                    : !locked && <span style={{ fontSize: '0.7rem', color: '#475569' }}>{picks.size}/{MAX_PICKS} valda</span>
-                }
+                {saving[group.groupId] && <span style={{ fontSize: '0.75rem', color: '#94A3B8' }}>Sparar...</span>}
               </div>
-
-              {/* Lock-tid – amber = öppen, grå + 🔒 = stängd */}
               {lockStr && (
                 <span style={{ fontSize: '0.7rem', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 4, color: locked ? '#475569' : '#F59E0B', flexShrink: 0 }}>
                   {locked && <span>🔒</span>}
@@ -199,89 +151,59 @@ function BonusTab({ user }) {
               )}
             </div>
 
-            {/* ─ Alternativknappar: en sektion per points-nivå ─ */}
-            {(() => {
-              // Gruppera dynamiskt på points-kolumnen, sorterat stigande
-              const minPoints = Math.min(...group.options.map(o => o.points ?? 5))
-              const pointGroups = [...new Set(group.options.map(o => o.points ?? 5))]
-                .sort((a, b) => a - b)
-                .map(pts => ({
-                  points:  pts,
-                  options: group.options.filter(o => (o.points ?? 5) === pts),
-                }))
-              const multiLevel = pointGroups.length > 1
+            {/* Alternativknappar per points-nivå */}
+            {pointGroups.map((pg, pgIdx) => {
+              const isHigher = pg.points > minPoints
+              return (
+                <div key={pg.points}>
+                  {pgIdx > 0 && <div style={{ height: 1, background: '#334155' }} />}
 
-              return pointGroups.map((pg, pgIdx) => {
-                const isHigher = pg.points > minPoints
-                return (
-                  <div key={pg.points}>
-                    {/* Separator mellan sektioner */}
-                    {pgIdx > 0 && <div style={{ height: 1, background: '#334155' }} />}
-
-                    {/* Sektionsrubrik (visas bara om det finns flera nivåer) */}
-                    {multiLevel && (
-                      <div style={{
-                        padding: '0.5rem 1rem',
-                        display: 'flex', alignItems: 'center', gap: 6,
-                        background: isHigher ? 'rgba(245,158,11,0.05)' : 'transparent',
-                        borderBottom: '1px solid #334155',
-                      }}>
-                        <span style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748B' }}>
-                          {pg.points} poäng
-                        </span>
-                        <span style={{
-                          fontSize: '0.6rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99,
-                          background: isHigher ? 'rgba(245,158,11,0.18)' : 'rgba(59,130,246,0.18)',
-                          color:      isHigher ? '#F59E0B'               : '#93C5FD',
-                        }}>
-                          {pg.points}p
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Alternativknappar – omnumrerade 1,2,3,... inom sektionen */}
-                    <div style={{
-                      padding: '0.75rem',
-                      display: 'flex', flexDirection: 'column', gap: 8,
-                      background: isHigher ? 'rgba(245,158,11,0.02)' : 'transparent',
-                    }}>
-                      {pg.options.map((opt, i) => {
-                        const displayNum = i + 1
-                        const sel        = picks.has(opt.option_number)
-                        const disabled   = locked || !user
-                        return (
-                          <button
-                            key={opt.id}
-                            onClick={() => !disabled && pick(group.groupId, opt.option_number)}
-                            disabled={disabled}
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: 12,
-                              padding: '0.625rem 0.75rem', borderRadius: 12,
-                              cursor: disabled ? 'not-allowed' : 'pointer',
-                              textAlign: 'left', width: '100%',
-                              opacity: locked && !sel ? 0.45 : 1,
-                              background: sel ? 'rgba(245,158,11,0.08)' : 'transparent',
-                              border: `1.5px solid ${sel ? '#F59E0B' : '#334155'}`,
-                              transition: 'opacity 0.2s',
-                            }}
-                          >
-                            <span style={{ fontSize: '0.875rem', fontWeight: 900, width: 20, textAlign: 'center', flexShrink: 0, color: sel ? '#F59E0B' : '#475569' }}>
-                              {displayNum}
-                            </span>
-                            <span style={{ fontSize: '0.875rem', flex: 1, color: sel ? '#F1F5F9' : (locked ? '#64748B' : '#94A3B8') }}>
-                              {opt.option_text}
-                            </span>
-                            {sel && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ADE80', flexShrink: 0 }}>✓ Valt</span>}
-                          </button>
-                        )
-                      })}
+                  {multiLevel && (
+                    <div style={{ padding: '0.5rem 1rem', display: 'flex', alignItems: 'center', gap: 6, background: isHigher ? 'rgba(245,158,11,0.05)' : 'transparent', borderBottom: '1px solid #334155' }}>
+                      <span style={{ fontSize: '0.65rem', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#64748B' }}>
+                        {pg.points} poäng
+                      </span>
+                      <span style={{ fontSize: '0.6rem', fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: isHigher ? 'rgba(245,158,11,0.18)' : 'rgba(59,130,246,0.18)', color: isHigher ? '#F59E0B' : '#93C5FD' }}>
+                        {pg.points}p
+                      </span>
                     </div>
-                  </div>
-                )
-              })
-            })()}
+                  )}
 
-            {/* ─ Footer ─ */}
+                  <div style={{ padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: 8, background: isHigher ? 'rgba(245,158,11,0.02)' : 'transparent' }}>
+                    {pg.options.map((opt, i) => {
+                      const sel      = localPicks[group.groupId] === opt.option_number
+                      const disabled = locked || !user
+                      return (
+                        <button
+                          key={opt.id}
+                          onClick={() => !disabled && pick(group.groupId, opt.option_number)}
+                          disabled={disabled}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 12,
+                            padding: '0.625rem 0.75rem', borderRadius: 12,
+                            cursor: disabled ? 'not-allowed' : 'pointer',
+                            textAlign: 'left', width: '100%',
+                            opacity: locked && !sel ? 0.45 : 1,
+                            background: sel ? 'rgba(245,158,11,0.08)' : 'transparent',
+                            border: `1.5px solid ${sel ? '#F59E0B' : '#334155'}`,
+                            transition: 'opacity 0.2s',
+                          }}
+                        >
+                          <span style={{ fontSize: '0.875rem', fontWeight: 900, width: 20, textAlign: 'center', flexShrink: 0, color: sel ? '#F59E0B' : '#475569' }}>
+                            {i + 1}
+                          </span>
+                          <span style={{ fontSize: '0.875rem', flex: 1, color: sel ? '#F1F5F9' : (locked ? '#64748B' : '#94A3B8') }}>
+                            {opt.option_text}
+                          </span>
+                          {sel && <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#4ADE80', flexShrink: 0 }}>✓ Valt</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+
             {!user && (
               <p style={{ margin: 0, padding: '0 0.75rem 0.75rem', textAlign: 'center', fontSize: '0.75rem', color: '#475569' }}>
                 Logga in för att spara ditt svar
@@ -299,6 +221,4 @@ function BonusTab({ user }) {
   )
 }
 
-// Only re-render when user.id changes – parent re-renders do not affect this component.
-// now-state uppdateras internt och påverkas inte av denna memo-jämförelse.
 export default memo(BonusTab, (prev, next) => prev.user?.id === next.user?.id)
